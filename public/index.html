@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Branch Console</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2230; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --accent-d: #1f6feb;
+    --green: #3fb950; --red: #f85149; --amber: #d29922; --purple: #a371f7;
+    --radius: 9px; --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 20px 80px; }
+
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  header h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
+  header h1 .dot { color: var(--accent); }
+  .repo { color: var(--muted); font: 12px/1 var(--mono); }
+  .spacer { flex: 1; }
+
+  .subbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 14px 0 18px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
+  .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+
+  /* segmented toggle */
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--muted); border: 0; padding: 6px 13px;
+    font: 12px/1 var(--mono); cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .seg button:not(.on):hover { background: var(--panel2); color: var(--text); }
+
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
+    font-size: 11.5px; border: 1px solid var(--border); background: var(--panel2); color: var(--muted); }
+  .chip.cur { color: var(--green); border-color: #243; }
+  .chip.dirty { color: var(--amber); border-color: #432; }
+  .chip.clean { color: var(--green); border-color: #243; }
+
+  .minef { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
+    font-size: 12.5px; cursor: pointer; user-select: none; }
+  .minef input { accent-color: var(--accent); width: 14px; height: 14px; }
+
+  .stalebanner { margin: 14px 0 0; padding: 11px 14px; border-radius: var(--radius);
+    background: rgba(248,81,73,.12); border: 1px solid #79302c; color: #ffb4ad; font-size: 13px; }
+  .stalebanner code { background: #0a0d12; padding: 1px 6px; border-radius: 4px; font-family: var(--mono); color: #e6edf3; }
+
+  button.btn { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  button.btn:hover:not(:disabled) { border-color: var(--muted); }
+  button.btn:disabled { opacity: .4; cursor: not-allowed; }
+  button.btn.accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.btn.accent:hover:not(:disabled) { background: var(--accent-d); }
+  button.btn.ghost { background: transparent; }
+  button.btn.danger { background: transparent; color: var(--red); }
+  button.btn.danger:hover:not(:disabled) { border-color: var(--red); background: rgba(248,81,73,.08); }
+
+  /* branch list */
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 15px; }
+  .row.current { border-color: #2c4a30; box-shadow: inset 3px 0 0 var(--green); }
+  .meta { min-width: 0; }
+  .name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .name .b { font: 600 14px/1 var(--mono); color: var(--text); }
+  .name .b.main { color: var(--purple); }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+  .tag.cur { color: var(--green); border-color: #243; }
+  .tag.merged { color: var(--purple); border-color: #3a2d52; }
+  .tag.lock { color: var(--amber); border-color: #432; }
+  .tag.draft { color: var(--amber); border-color: #432; }
+  .tag.notmine { color: var(--amber); border-color: #432; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub .sha { font-family: var(--mono); color: #6e7681; }
+  .ab { font-family: var(--mono); font-size: 12px; margin-left: 2px; }
+  .ab .up { color: var(--green); }
+  .ab .down { color: var(--red); }
+  .ab .even { color: #6e7681; }
+  .actions { display: flex; gap: 7px; align-items: center; }
+
+  /* output panel */
+  .out { position: fixed; left: 0; right: 0; bottom: 0; background: #0a0d12; border-top: 1px solid var(--border);
+    max-height: 42vh; display: none; flex-direction: column; }
+  .out.show { display: flex; }
+  .out .head { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+  .out .head .ttl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .out pre { margin: 0; padding: 12px 16px; overflow: auto; font: 12px/1.5 var(--mono); color: #c9d1d9; white-space: pre-wrap; }
+  .ok { color: var(--green); } .err { color: var(--red); }
+
+  /* modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(1,4,9,.7); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .modal-bg.show { display: flex; }
+  .modal { width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+  .modal h3 { margin: 0 0 4px; font-size: 16px; }
+  .modal .desc { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .cmd { background: #0a0d12; border: 1px solid var(--border); border-radius: 7px; padding: 11px 13px;
+    font: 12.5px/1.6 var(--mono); color: #c9d1d9; white-space: pre-wrap; word-break: break-all; }
+  .warn { margin-top: 12px; padding: 9px 12px; border-radius: 7px; font-size: 12.5px;
+    background: rgba(210,153,34,.1); border: 1px solid #432; color: var(--amber); }
+  .modal .field { margin-top: 12px; }
+  .modal .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  .modal input, .modal textarea { width: 100%; background: #0a0d12; color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 8px 11px; font: 13px var(--mono); resize: vertical; }
+  .modal .foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+
+  .empty { color: var(--muted); text-align: center; padding: 40px; }
+  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="dot">●</span> Branch Console</h1>
+    <span class="repo" id="repoPath">…</span>
+    <span class="spacer"></span>
+    <span class="chip" id="curChip">…</span>
+    <span class="chip" id="dirtyChip" style="display:none"></span>
+  </header>
+
+  <div id="staleBanner" class="stalebanner" style="display:none"></div>
+
+  <div class="subbar">
+    <span class="lbl">Reset / Rebase target</span>
+    <div class="seg" id="seg">
+      <button data-t="main" class="on">main</button>
+      <button data-t="origin/main">origin/main</button>
+    </div>
+    <label class="minef"><input type="checkbox" id="mineOnly" /> Mine only</label>
+    <span class="spacer"></span>
+    <span class="lbl" id="countLbl"></span>
+    <button class="btn ghost" id="fetchBtn">⟳ Fetch</button>
+    <button class="btn ghost" id="refreshBtn">↻ Refresh</button>
+  </div>
+
+  <div class="list" id="list"><div class="empty">Loading branches…</div></div>
+</div>
+
+<!-- confirm / pr modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modal"></div>
+</div>
+
+<!-- output panel -->
+<div class="out" id="out">
+  <div class="head">
+    <span class="ttl" id="outTitle">Output</span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="btn ghost" onclick="document.getElementById('out').classList.remove('show')">✕ close</button>
+  </div>
+  <pre id="outPre"></pre>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const CLIENT_VERSION = 3;
+let TARGET = 'main';
+let MINE_ONLY = false;
+let STATE = { current: '', dirty: false, main: 'main' };
+
+const api = {
+  state:    () => fetch('/api/state').then(r => r.json()),
+  branches: (t) => fetch('/api/branches?target=' + encodeURIComponent(t)).then(r => r.json()),
+  post:     async (p, body) => {
+    const res = await fetch('/api/' + p, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body || {}) });
+    if (!res.ok) {
+      if (res.status === 404)
+        return { ok: false, error: `“/api/${p}” doesn’t exist on the running server — it’s on OLD code. Restart it: Ctrl-C in its terminal, then ./start.sh` };
+      return { ok: false, error: `server returned HTTP ${res.status}` };
+    }
+    return res.json();
+  },
+};
+
+function checkVersion(state) {
+  const el = $('#staleBanner');
+  if (state && state.version === CLIENT_VERSION) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = `⚠ <b>Server is running old code</b> (server v${(state && state.version) || 1}, page v${CLIENT_VERSION}). ` +
+    `Newer buttons like <b>Delete</b> will fail until you restart it — <code>Ctrl-C</code> in its terminal, then <code>./start.sh</code>.`;
+}
+
+function esc(s) { return (s || '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ── command previews (mirror server.js) ──
+const resetCmd  = (b) => b === STATE.current ? `git reset --hard ${TARGET}` : `git branch -f ${b} ${TARGET}`;
+const rebaseCmd = (b) => b === STATE.current ? `git rebase ${TARGET}` : `git rebase ${TARGET} ${b}`;
+const prCmd     = (b, hasTitle) => `git push -u origin ${b}\ngh pr create --base ${STATE.main} --head ${b} ${hasTitle ? '--title … --body …' : '--fill'}`;
+
+// ── render ──
+async function load() {
+  const [st, data] = await Promise.all([api.state(), api.branches(TARGET)]);
+  STATE = st;
+  checkVersion(st);
+  $('#repoPath').textContent = st.repo;
+  $('#curChip').className = 'chip cur';
+  $('#curChip').textContent = '⎇ ' + st.current;
+  const dc = $('#dirtyChip');
+  dc.style.display = 'inline-flex';
+  dc.className = 'chip ' + (st.dirty ? 'dirty' : 'clean');
+  dc.textContent = st.dirty ? '● uncommitted changes' : '✓ clean tree';
+  renderList(data);
+}
+
+let LAST_DATA = { branches: [] };
+function renderList(data) {
+  LAST_DATA = data;
+  const list = $('#list');
+  if (data.prError) console.warn('PR lookup:', data.prError);
+  const all = data.branches || [];
+  const rows = MINE_ONLY ? all.filter((b) => b.mine) : all;
+  $('#countLbl').textContent = MINE_ONLY ? `${rows.length} of ${all.length} (mine)` : `${all.length} branches`;
+  if (!rows.length) { list.innerHTML = `<div class="empty">${all.length ? 'No branches match “Mine only”.' : 'No branches.'}</div>`; return; }
+
+  list.innerHTML = rows.map((b) => {
+    const isTargetSelf = b.name === TARGET || (TARGET === 'main' && b.name === STATE.main);
+    const locked = !!b.lockedAt;
+    const blockEdit = locked; // can't reset/rebase a branch checked out elsewhere
+
+    const ab = b.ahead === 0 && b.behind === 0
+      ? `<span class="even">≡ even with ${TARGET}</span>`
+      : `${b.ahead ? `<span class="up">↑${b.ahead}</span> ` : ''}${b.behind ? `<span class="down">↓${b.behind}</span> ` : ''}<span class="even">vs ${TARGET}</span>`;
+
+    const tags = [];
+    if (b.isCurrent) tags.push('<span class="tag cur">current</span>');
+    if (!b.mine) tags.push(`<span class="tag notmine" title="last commits by ${esc(b.author)} — not yours">by ${esc(b.author || '?')}</span>`);
+    if (b.merged && !b.isMain) tags.push('<span class="tag merged">merged</span>');
+    if (locked) tags.push(`<span class="tag lock" title="${esc(b.lockedAt)}">🔒 worktree</span>`);
+
+    const pr = b.pr
+      ? `<a href="${esc(b.pr.url)}" target="_blank" title="${esc(b.pr.title)}">#${b.pr.number}${b.pr.isDraft ? ' <span class="tag draft">draft</span>' : ''}</a>`
+      : '<span style="color:#6e7681">no PR</span>';
+
+    return `<div class="row ${b.isCurrent ? 'current' : ''}">
+      <div class="meta">
+        <div class="name">
+          <span class="b ${b.isMain ? 'main' : ''}">${esc(b.name)}</span>
+          <span class="tags">${tags.join('')}</span>
+        </div>
+        <div class="sub">
+          <span class="sha">${esc(b.sha)}</span> · ${esc(b.subject)} · ${esc(b.rel)}
+          &nbsp; <span class="ab">${ab}</span> &nbsp; · PR: ${pr}
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" ${blockEdit || isTargetSelf ? 'disabled' : ''} title="${blockEdit ? 'checked out in another worktree' : (isTargetSelf ? 'already the target' : 'git reset')}"
+          onclick="askReset('${esc(b.name)}')">↺ Reset</button>
+        <button class="btn" ${blockEdit || isTargetSelf ? 'disabled' : ''} title="${blockEdit ? 'checked out in another worktree' : (isTargetSelf ? 'already the target' : 'git rebase')}"
+          onclick="askRebase('${esc(b.name)}')">⤴ Rebase</button>
+        <button class="btn accent" ${b.isMain ? 'disabled' : ''} title="${b.isMain ? "can't PR main" : 'push & open PR'}"
+          onclick="askPR('${esc(b.name)}')">⬈ PR</button>
+        <button class="btn danger" ${b.isMain || b.isCurrent || locked ? 'disabled' : ''}
+          title="${b.isMain ? "can't delete main" : b.isCurrent ? 'currently checked out' : locked ? 'checked out in another worktree' : 'delete branch'}"
+          onclick="askDelete('${esc(b.name)}', ${b.upstream ? 'true' : 'false'})">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── modal ──
+function closeModal() { $('#modalBg').classList.remove('show'); }
+$('#modalBg').addEventListener('click', (e) => { if (e.target === $('#modalBg')) closeModal(); });
+
+function confirmModal({ title, desc, command, warn, confirmLabel, danger, onConfirm }) {
+  $('#modal').innerHTML = `
+    <h3>${esc(title)}</h3>
+    <div class="desc">${esc(desc || '')}</div>
+    <div class="cmd">${esc(command)}</div>
+    ${warn ? `<div class="warn">⚠ ${esc(warn)}</div>` : ''}
+    <div class="foot">
+      <button class="btn ghost" id="mCancel">Cancel</button>
+      <button class="btn ${danger ? '' : 'accent'}" id="mOk" style="${danger ? 'background:var(--red);border-color:var(--red);color:#fff' : ''}">${esc(confirmLabel || 'Run')}</button>
+    </div>`;
+  $('#modalBg').classList.add('show');
+  $('#mCancel').onclick = closeModal;
+  $('#mOk').onclick = () => { closeModal(); onConfirm(); };
+}
+
+function askReset(b) {
+  const onCur = b === STATE.current;
+  confirmModal({
+    title: `Reset “${b}” → ${TARGET}`,
+    desc: onCur ? 'Hard-resets the checked-out branch.' : 'Force-moves the branch pointer.',
+    command: resetCmd(b),
+    danger: true,
+    confirmLabel: 'Reset (hard)',
+    warn: onCur
+      ? (STATE.dirty ? 'You have uncommitted changes — a hard reset will DISCARD them.' : 'Commits on this branch ahead of the target will be discarded.')
+      : 'Commits on this branch ahead of the target will be discarded.',
+    onConfirm: () => act('reset', { branch: b, target: TARGET }, `Reset ${b} → ${TARGET}`),
+  });
+}
+
+function askRebase(b) {
+  confirmModal({
+    title: `Rebase “${b}” onto ${TARGET}`,
+    desc: 'Replays this branch’s commits on top of the target. Auto-aborts on conflict.',
+    command: rebaseCmd(b),
+    confirmLabel: 'Rebase',
+    warn: (b === STATE.current && STATE.dirty) ? 'Uncommitted changes may block the rebase — commit or stash first.' : '',
+    onConfirm: () => act('rebase', { branch: b, target: TARGET }, `Rebase ${b} onto ${TARGET}`),
+  });
+}
+
+function askPR(b) {
+  $('#modal').innerHTML = `
+    <h3>Open PR · “${esc(b)}” → ${esc(STATE.main)}</h3>
+    <div class="desc">Pushes the branch, then creates the PR. Leave fields blank to auto-fill from commits.</div>
+    <div class="cmd">${esc(prCmd(b, false))}</div>
+    <div class="field"><label>Title (optional)</label><input id="prTitle" placeholder="auto-fill from commits" /></div>
+    <div class="field"><label>Body (optional)</label><textarea id="prBody" rows="4" placeholder="auto-fill from commits"></textarea></div>
+    <div class="foot">
+      <button class="btn ghost" id="mCancel">Cancel</button>
+      <button class="btn accent" id="mOk">Push & Create PR</button>
+    </div>`;
+  $('#modalBg').classList.add('show');
+  $('#mCancel').onclick = closeModal;
+  $('#mOk').onclick = () => {
+    const title = $('#prTitle').value, body = $('#prBody').value;
+    closeModal();
+    act('pr', { branch: b, title, body }, `Open PR for ${b}`);
+  };
+}
+
+function askDelete(b, hasRemote) {
+  $('#modal').innerHTML = `
+    <h3>Delete branch “${esc(b)}”</h3>
+    <div class="desc">Removes the local branch (recoverable via <code>git reflog</code> for a while).</div>
+    <div class="cmd" id="delCmd">git branch -D ${esc(b)}</div>
+    ${hasRemote ? `<label class="minef" style="margin-top:12px"><input type="checkbox" id="delRemote" /> Also delete remote <code>origin/${esc(b)}</code> (affects the shared GitHub repo)</label>` : ''}
+    <div class="warn">⚠ Force-deletes even if the branch isn’t merged.</div>
+    <div class="foot">
+      <button class="btn ghost" id="mCancel">Cancel</button>
+      <button class="btn" id="mOk" style="background:var(--red);border-color:var(--red);color:#fff">Delete</button>
+    </div>`;
+  $('#modalBg').classList.add('show');
+  $('#mCancel').onclick = closeModal;
+  const remoteBox = $('#delRemote');
+  if (remoteBox) remoteBox.onchange = () => {
+    $('#delCmd').textContent = `git branch -D ${b}` + (remoteBox.checked ? `\ngit push origin --delete ${b}` : '');
+  };
+  $('#mOk').onclick = () => {
+    const remote = !!(remoteBox && remoteBox.checked);
+    closeModal();
+    act('delete', { branch: b, remote }, `Delete ${b}${remote ? ' (+ remote)' : ''}`);
+  };
+}
+
+// ── run an action ──
+async function act(endpoint, body, label) {
+  showOut(label, '<span class="spin"></span> running…', false);
+  const r = await api.post(endpoint, body);
+  const lines = [];
+  if (r.cmd) lines.push('$ ' + r.cmd);
+  if (r.stdout && r.stdout.trim()) lines.push(r.stdout.trim());
+  if (r.stderr && r.stderr.trim()) lines.push(r.stderr.trim());
+  if (r.url) lines.push((r.existing ? 'PR already open: ' : 'PR created: ') + r.url);
+  if (r.error) lines.push('✖ ' + r.error);
+  const head = r.ok
+    ? `<span class="ok">✓ ${esc(label)}</span>` + (r.url ? ` — <a href="${esc(r.url)}" target="_blank">${esc(r.url)}</a>` : '')
+    : `<span class="err">✖ ${esc(label)} failed</span>`;
+  showOut(label, head + '\n\n' + esc(lines.join('\n\n')), true);
+  load(); // refresh list
+}
+
+function showOut(title, html, persist) {
+  $('#outTitle').textContent = title;
+  $('#outPre').innerHTML = html;
+  $('#out').classList.add('show');
+}
+
+// ── controls ──
+$('#seg').addEventListener('click', (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  TARGET = btn.dataset.t;
+  [...$('#seg').children].forEach((c) => c.classList.toggle('on', c === btn));
+  load();
+});
+$('#mineOnly').addEventListener('change', (e) => { MINE_ONLY = e.target.checked; renderList(LAST_DATA); });
+$('#refreshBtn').onclick = load;
+$('#fetchBtn').onclick = async () => {
+  $('#fetchBtn').innerHTML = '<span class="spin"></span>';
+  await act('fetch', {}, 'git fetch --prune');
+  $('#fetchBtn').innerHTML = '⟳ Fetch';
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+load();
+</script>
+</body>
+</html>
