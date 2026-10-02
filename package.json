@@ -2,9 +2,10 @@
   "name": "branch-console",
   "version": "1.0.0",
   "private": true,
-  "description": "Local, zero-dependency git ops dashboard: list branches + one-click Reset / Rebase / open PR.",
+  "description": "Local, zero-dependency git ops dashboard: every branch's status at a glance + one-click Push / PR / Rebase / Reset / Delete.",
   "bin": { "branch-console": "server.js" },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   }
 }

@@ -1,7 +1,7 @@
 'use strict';
 
 // Branch Console — a tiny, zero-dependency, local-only git ops dashboard.
-// Lists branches in a repo and exposes one-click Reset / Rebase / Generate-PR.
+// Lists branches in a repo and exposes one-click Push / PR / Rebase / Reset / Delete.
 // No code review, no Claude in the loop — these are deterministic git/gh commands.
 //
 //   REPO=/path/to/repo PORT=5252 node server.js
@@ -14,6 +14,8 @@ const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
 
+const { pushState, branchStatus, buildPrQuery, mapPrResponse, parseGithubRemote, parseShortstat } = require('./lib/status');
+
 const execFileP = promisify(execFile);
 
 const REPO = process.env.REPO || '/home/piyush/claude/scalper';
@@ -21,7 +23,7 @@ const PORT = parseInt(process.env.PORT || '5252', 10);
 const HOST = '127.0.0.1';
 const MAIN = process.env.MAIN_BRANCH || 'main'; // PR base + reset/rebase target name
 const VALID_TARGETS = new Set([MAIN, `origin/${MAIN}`]);
-const VERSION = 4; // v4: per-branch worktree + running dev ports, richer PR status, details dropdown
+const VERSION = 5; // v5: per-branch status verdict, push state, lighter PR lookup, push / update-main actions
 
 // "Mine" detection — a branch is mine if its commits ahead of the target were
 // authored by one of these emails. Seeded from MY_EMAILS env + git config user.email.
@@ -156,82 +158,94 @@ function portsForPath(devPorts, wtPath) {
     .sort((a, b) => (a.kind === b.kind ? a.port - b.port : a.kind === 'FE' ? -1 : 1));
 }
 
+// When did any worktree of this repo last fetch? (newest FETCH_HEAD mtime, ms) — null if never.
+async function lastFetchedAt() {
+  const common = (await git('rev-parse', '--path-format=absolute', '--git-common-dir')).stdout.trim();
+  if (!common) return null;
+  const files = [path.join(common, 'FETCH_HEAD')];
+  try {
+    for (const d of fs.readdirSync(path.join(common, 'worktrees'))) files.push(path.join(common, 'worktrees', d, 'FETCH_HEAD'));
+  } catch { /* no linked worktrees */ }
+  let newest = null;
+  for (const f of files) {
+    try { const t = fs.statSync(f).mtimeMs; if (newest === null || t > newest) newest = t; } catch { /* missing */ }
+  }
+  return newest;
+}
+
 async function getState() {
-  const [cur, dirtyR, originR] = await Promise.all([
+  const [cur, dirtyR, originR, mainR, fetchedAt] = await Promise.all([
     git('rev-parse', '--abbrev-ref', 'HEAD'),
     git('status', '--porcelain'),
     git('rev-parse', '--verify', `origin/${MAIN}`),
+    git('rev-list', '--left-right', '--count', `${MAIN}...origin/${MAIN}`),
+    lastFetchedAt(),
   ]);
+  // local main vs origin/main — a stale local main makes every "vs main" number misleading
+  const [mainAhead, mainBehind] = mainR.code === 0
+    ? mainR.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0) : [0, 0];
   return {
     repo: REPO,
+    repoName: path.basename(REPO),
     current: cur.stdout.trim(),
     dirty: dirtyR.stdout.trim().length > 0,
+    dirtyCount: dirtyR.stdout.split('\n').filter((l) => l.trim()).length,
     main: MAIN,
     hasOriginMain: originR.code === 0,
+    mainAhead: mainAhead || 0,
+    mainBehind: mainBehind || 0,
+    fetchedAt,
     version: VERSION,
   };
 }
 
-// Roll a PR's individual CI checks up into { pass, fail, pending, total, overall }.
-function summarizeChecks(rollup) {
-  if (!Array.isArray(rollup) || !rollup.length) return null;
-  let pass = 0, fail = 0, pending = 0;
-  for (const c of rollup) {
-    const status = (c.status || '').toUpperCase();          // CheckRun status
-    const concl = (c.conclusion || c.state || '').toUpperCase(); // CheckRun conclusion / StatusContext state
-    if (status && status !== 'COMPLETED') { pending++; continue; }
-    if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(concl)) pass++;
-    else if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(concl)) fail++;
-    else if (['PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED'].includes(concl)) pending++;
-    else pass++; // completed but unrecognised → treat as non-blocking
-  }
-  const total = pass + fail + pending;
-  const overall = fail ? 'failing' : pending ? 'pending' : 'passing';
-  return { pass, fail, pending, total, overall };
-}
+// ── pull requests ─────────────────────────────────────────────────────────────
+// One small GraphQL query for exactly the local branches (see lib/status.js). The last good
+// answer is kept, so a GitHub hiccup shows slightly old PR data instead of "no PR" everywhere.
+const PR_TTL_MS = 45000;
+let prCache = { map: {}, at: null, key: '' };
+let ghRepo; // { owner, name } | null — resolved once from the origin remote
 
-async function listPRs() {
-  // --state all so a branch's merged/closed PR still surfaces (not just open ones).
-  const r = await gh(
-    'pr', 'list', '--state', 'all',
-    '--json', 'number,url,headRefName,isDraft,title,state,reviewDecision,statusCheckRollup,baseRefName,updatedAt,mergeable',
-    '--limit', '200'
-  );
-  if (r.code !== 0) return { map: {}, error: (r.stderr || 'gh pr list failed').split('\n')[0] };
+async function listPRs(branches, force) {
+  const key = branches.join('\n');
+  if (!force && prCache.at && prCache.key === key && Date.now() - prCache.at < PR_TTL_MS)
+    return { map: prCache.map, error: null, at: prCache.at };
+  const fail = (error) => ({ map: prCache.map, error, at: prCache.at });
+
+  if (ghRepo === undefined) ghRepo = parseGithubRemote((await git('remote', 'get-url', 'origin')).stdout);
+  if (!ghRepo) return fail('origin is not a GitHub remote — PR info is unavailable');
+  if (!branches.length) return { map: {}, error: null, at: Date.now() };
+
+  const { query, vars } = buildPrQuery(branches, ghRepo.owner, ghRepo.name);
+  const args = ['api', 'graphql', '-f', `query=${query}`];
+  for (const [k, v] of Object.entries(vars)) args.push('-f', `${k}=${v}`);
+  const r = await gh(...args);
+  if (r.code !== 0) return fail((r.stderr || 'GitHub PR lookup failed').trim().split('\n')[0]);
   try {
-    const map = {};
-    const rank = (p) => (p.state === 'OPEN' ? 2 : 1); // prefer the open PR; else newest number
-    JSON.parse(r.stdout || '[]').forEach((p) => {
-      const cur = map[p.headRefName];
-      if (cur && !(rank(p) > rank(cur) || (rank(p) === rank(cur) && p.number > cur.number))) return;
-      map[p.headRefName] = {
-        number: p.number, url: p.url, isDraft: p.isDraft, title: p.title,
-        state: p.state, reviewDecision: p.reviewDecision || null, baseRefName: p.baseRefName || null,
-        updatedAt: p.updatedAt || null, mergeable: p.mergeable || null,
-        checks: summarizeChecks(p.statusCheckRollup),
-      };
-    });
-    return { map, error: null };
+    const out = JSON.parse(r.stdout || '{}');
+    if (!out.data) return fail((out.errors && out.errors[0] && out.errors[0].message) || 'GitHub returned no data');
+    prCache = { map: mapPrResponse(out.data, branches), at: Date.now(), key };
+    return { map: prCache.map, error: null, at: prCache.at };
   } catch {
-    return { map: {}, error: 'could not parse gh output' };
+    return fail('could not parse the GitHub response');
   }
 }
 
-async function listBranches(target) {
+async function listBranches(target, force) {
   if (!VALID_TARGETS.has(target)) target = MAIN;
   await ensureMyEmails();
   const SEP = '\x1f';
   const fmt = [
     '%(refname:short)', '%(objectname:short)', '%(committerdate:relative)',
     '%(upstream:short)', '%(upstream:track)', '%(authorname)', '%(authoremail)', '%(contents:subject)',
+    '%(objectname)',
   ].join(SEP);
 
-  const [refsR, curR, mergedR, wt, prR, devPorts] = await Promise.all([
+  const [refsR, curR, mergedR, wt, devPorts] = await Promise.all([
     git('for-each-ref', '--sort=-committerdate', `--format=${fmt}`, 'refs/heads'),
     git('rev-parse', '--abbrev-ref', 'HEAD'),
     git('branch', '--merged', target, '--format=%(refname:short)'),
     worktreeMap(),
-    listPRs(),
     listeningDevPorts(),
   ]);
 
@@ -239,12 +253,13 @@ async function listBranches(target) {
   const merged = new Set(mergedR.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
 
   const rows = refsR.stdout.split('\n').filter(Boolean).map((line) => {
-    const [name, sha, rel, upstream, track, author, authorEmail, subject] = line.split(SEP);
+    const [name, sha, rel, upstream, track, author, authorEmail, subject, fullSha] = line.split(SEP);
     return {
-      name, sha, rel, upstream: upstream || null, track: track || '',
+      name, sha, fullSha, rel, upstream: upstream || null, track: track || '',
       author: author || '', authorEmail: normEmail(authorEmail), subject: subject || '',
     };
   });
+  const prR = await listPRs(rows.map((r) => r.name).filter((n) => n !== MAIN), force);
 
   await Promise.all(rows.map(async (r) => {
     if (r.name === target) {
@@ -267,7 +282,9 @@ async function listBranches(target) {
     r.worktreeName = lock ? path.basename(lock) : null;
     r.ports = portsForPath(devPorts, lock);           // dev servers actually LISTENING for this worktree
     r.expectedPorts = lock ? expectedPorts(r.worktreeName) : null;
-    r.pr = prR.map[r.name] || null;
+    const pr = prR.map[r.name];
+    r.pr = pr ? { ...pr, atTip: pr.headRefOid === r.fullSha } : null; // atTip: nothing new since that PR
+    r.push = pushState(r.upstream, r.track);          // vs its OWN remote branch
     // mine: current branch, OR any commit unique to this branch is mine,
     // OR (no unique commits) the tip author is mine.
     r.mine = r.isCurrent
@@ -275,8 +292,25 @@ async function listBranches(target) {
       : (r.aheadAuthors.length ? r.aheadAuthors.some(isMineEmail) : isMineEmail(r.authorEmail));
   }));
 
+  rows.forEach((r) => { r.status = branchStatus(r, target); }); // the one-line verdict + suggested action
   rows.sort((a, b) => (b.isCurrent ? 1 : 0) - (a.isCurrent ? 1 : 0));
-  return { target, current, prError: prR.error, branches: rows };
+  return { target, current, prError: prR.error, prAt: prR.at, branches: rows };
+}
+
+// Lazy per-branch detail for the expanded row: the commits this branch adds on top of the target.
+async function branchDetail(name, target) {
+  if (!(await localBranches()).includes(name)) return { ok: false, error: `unknown branch: ${name}` };
+  if (!VALID_TARGETS.has(target)) target = MAIN;
+  const SEP = '\x1f', MAX = 30;
+  const [logR, statR] = await Promise.all([
+    git('log', `${target}..${name}`, `--format=%h${SEP}%s${SEP}%an${SEP}%cr`, '-n', String(MAX + 1)),
+    git('diff', '--shortstat', `${target}...${name}`),
+  ]);
+  const commits = logR.stdout.split('\n').filter(Boolean).map((line) => {
+    const [sha, subject, author, rel] = line.split(SEP);
+    return { sha, subject, author, rel };
+  });
+  return { ok: true, name, target, more: commits.length > MAX, commits: commits.slice(0, MAX), stat: parseShortstat(statR.stdout) };
 }
 
 // ── actions ──────────────────────────────────────────────────────────────────
@@ -350,12 +384,31 @@ async function doPR({ branch, title, body }) {
   if (cr.code !== 0)
     return { ok: false, cmd: `${push.cmd} && ${cr.cmd}`, stderr: cr.stderr, error: (cr.stderr || 'gh pr create failed').split('\n').slice(0, 3).join(' ') };
 
+  prCache.at = null; // a PR now exists — look it up fresh
   const url = (cr.stdout || '').trim().split('\n').find((l) => l.startsWith('http')) || (cr.stdout || '').trim();
   return { ok: true, url, cmd: `${push.cmd} && ${cr.cmd}`, stdout: cr.stdout };
 }
 
 async function doFetch() {
   return resultOf(await git('fetch', '--prune', 'origin'));
+}
+
+// Plain push (never forced) — a diverged branch fails with git's own message.
+async function doPush({ branch }) {
+  if (!(await localBranches()).includes(branch)) return { ok: false, error: `unknown branch: ${branch}` };
+  if (branch === MAIN) return { ok: false, error: `refusing to push ${MAIN} from here` };
+  const r = await git('push', '-u', 'origin', branch);
+  prCache.at = null;
+  return resultOf(r);
+}
+
+// Fast-forward local main to origin/main without checking it out.
+async function doUpdateMain() {
+  const wt = await worktreeMap();
+  if (wt[MAIN] && wt[MAIN] !== REPO)
+    return { ok: false, error: `'${MAIN}' is checked out in ${wt[MAIN]} — run 'git pull --ff-only' there` };
+  if (wt[MAIN]) return resultOf(await git('pull', '--ff-only', 'origin', MAIN)); // main is the current checkout
+  return resultOf(await git('fetch', 'origin', `${MAIN}:${MAIN}`));              // fast-forward only; never forced
 }
 
 async function doDelete({ branch, remote }) {
@@ -409,14 +462,22 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(html);
     }
+    if (req.method === 'GET' && pathname === '/icon.svg') {
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+      return res.end(fs.readFileSync(path.join(__dirname, 'public', 'icon.svg')));
+    }
     if (req.method === 'GET' && pathname === '/api/state') return send(res, 200, await getState());
     if (req.method === 'GET' && pathname === '/api/branches')
-      return send(res, 200, await listBranches(url.searchParams.get('target') || MAIN));
+      return send(res, 200, await listBranches(url.searchParams.get('target') || MAIN, url.searchParams.get('force') === '1'));
+    if (req.method === 'GET' && pathname === '/api/branch')
+      return send(res, 200, await branchDetail(url.searchParams.get('name') || '', url.searchParams.get('target') || MAIN));
     if (req.method === 'POST' && pathname === '/api/fetch') return send(res, 200, await doFetch());
     if (req.method === 'POST' && pathname === '/api/reset') return send(res, 200, await doReset(await readBody(req)));
     if (req.method === 'POST' && pathname === '/api/rebase') return send(res, 200, await doRebase(await readBody(req)));
     if (req.method === 'POST' && pathname === '/api/pr') return send(res, 200, await doPR(await readBody(req)));
     if (req.method === 'POST' && pathname === '/api/delete') return send(res, 200, await doDelete(await readBody(req)));
+    if (req.method === 'POST' && pathname === '/api/push') return send(res, 200, await doPush(await readBody(req)));
+    if (req.method === 'POST' && pathname === '/api/update-main') return send(res, 200, await doUpdateMain());
 
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end('{"error":"not found"}');

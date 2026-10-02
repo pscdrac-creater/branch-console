@@ -3,34 +3,49 @@
 A tiny, **local-only, zero-dependency** web dashboard for the git commands you
 run over and over — so you click a button instead of re-typing a prompt.
 
-Lists every branch in a repo and gives each one:
+Every branch gets **one row with labelled columns**, so nothing is cut off:
 
-- **↺ Reset** — to local `main` or `origin/main` (toggle at the top)
-- **⤴ Rebase** — onto local `main` or `origin/main`
-- **⬈ PR** — push the branch and open a GitHub PR via `gh`
-- **🗑 Delete** — force-delete the local branch (optionally the remote too)
+| Column | What it tells you |
+|--------|-------------------|
+| **Branch** | Name, a plain-language **status** (see below), and the last commit |
+| **vs origin/main** | Commits ahead / behind the branch you compare with |
+| **Pushed** | Is it on GitHub? `in sync`, `3 not pushed`, `never pushed`, `diverged`, `remote deleted` |
+| **Pull request** | PR number, state, CI checks and review — or `no PR` |
+| **Running** | Which worktree it is checked out in, and its live dev ports (click to open `localhost`) |
+| **Actions** | **Push · Open PR · Rebase · Reset · Delete** — the suggested one is highlighted |
 
-Plus **Fetch** (`git fetch --prune`), a **Mine only** filter, and per-branch
-info: ahead/behind vs the target, last commit, merged-into-main badge, open-PR
-link, a `by <author>` flag on branches that aren't yours, and a 🔒 marker for
-branches checked out in another worktree.
+**Status** is the one-line answer to "what is going on with this branch?":
+`Unpushed work`, `Ready for a PR`, `PR checks failing`, `PR has conflicts`,
+`Changes requested`, `Approved — ready to merge`, `Local and remote differ`,
+`Merged — safe to delete`, `Nothing new — safe to delete`.
 
-Each checked-out branch also shows **which worktree it lives in and which dev
-ports it's actually running on** — e.g. `🖥 scalper-3003  FE :3003  BE :4003`
-(live ports are detected from the OS, not guessed; a worktree with nothing
-running shows `idle · nothing running`). Ports are matched to worktrees by the
-listening process's working directory (`ss -ltnp` → `/proc/<pid>/cwd`), covering
+Branches are grouped: **Checked out** (open in a worktree right now) →
+**Other work** → **Safe to clean up** → **Base branch**.
+
+Also on the page:
+
+- **Filters** — `All` / `Needs attention` / `Open PR` / `Clean-up`, a **Mine only**
+  toggle, and a search box (press `/`). Your choices are remembered.
+- **Compare with** — `origin/main` (default: what is on GitHub) or local `main`.
+  Ahead/behind, Reset and Rebase all use it. If local `main` is stale you get a
+  warning and a one-click **Update local main**.
+- **Click a row** to expand it: the commits that are not in the target, files
+  changed, remote branch, worktree path, dev servers, and full PR details.
+- **Freshness** — auto-refreshes every 30s while the tab is visible; the header
+  shows when the page last updated and when the repo last fetched. `r` refreshes.
+- **Fetch** (`git fetch --prune origin`) and a `by <author>` flag on branches
+  that aren't yours.
+
+Live ports are detected from the OS, not guessed: listening processes are matched
+to worktrees by their working directory (`ss -ltnp` → `/proc/<pid>/cwd`), covering
 the `300X`/`400X` and `7001`/`7002` dev-stack scheme.
 
-A **▾ Details** dropdown on every row expands the full picture:
-- **Branch** — SHA, subject, author + email, ahead/behind, upstream, merged.
-- **Worktree & ports** — worktree path and each live FE/BE port (process + pid).
-- **Pull request** — PR number + state (open / draft / merged / closed), base
-  branch, mergeability, **CI check rollup** (e.g. `passing · 9/9`), and review
-  decision.
+PR info comes from one small GitHub query for exactly your local branches. If
+GitHub can't be reached, the page says so and keeps showing the last good answer
+instead of pretending there are no PRs.
 
-Every Reset / Rebase / PR / Delete click shows the **exact command** and a
-confirm step first. Nothing fires on a single click.
+Every action shows the **exact command** and a confirm step first. Nothing fires
+on a single click.
 
 ## Run
 
@@ -67,19 +82,31 @@ REPO=/home/piyush/claude/scalper-3001 PORT=5300 node server.js
 
 | Button             | Current branch                  | Other branch                       |
 |--------------------|---------------------------------|------------------------------------|
+| Push               | `git push -u origin <b>` (never forced)                              |
 | Reset → `<target>` | `git reset --hard <target>`     | `git branch -f <b> <target>`       |
 | Rebase → `<target>`| `git rebase <target>`           | `git rebase <target> <b>` (then restores your checkout) |
 | PR                 | `git push -u origin <b>` then `gh pr create --base main --head <b> --fill` (or `--title/--body`) |
 | Delete             | `git branch -D <b>` (+ optional `git push origin --delete <b>`) |
+| Update local main  | `git pull --ff-only origin main` | `git fetch origin main:main` (fast-forward only) |
 
 **Mine only** filters to branches whose commits ahead of `main` were authored
 by you (`MY_EMAILS` + git config email); the current branch always counts as
 yours. Branches that aren't yours show a `by <author>` flag so you don't reset
 or delete a teammate's work.
 
-**Targets** are `main` (local) and `origin/main` (remote), chosen with the
-toggle. Rebase auto-aborts on conflict and leaves the repo untouched — resolve
-those by hand in your terminal.
+**Targets** are `origin/main` (remote, the default) and `main` (local), chosen
+with the **Compare with** toggle. Rebase auto-aborts on conflict and leaves the
+repo untouched — resolve those by hand in your terminal.
+
+After rebasing a branch that was already pushed, it shows **Local and remote
+differ**: that needs a force-push, which this page never does — run
+`git push --force-with-lease` in your terminal.
+
+## Tests
+
+```bash
+npm test        # node --test — the status / PR-lookup logic in lib/status.js
+```
 
 ## Troubleshooting
 
@@ -90,8 +117,10 @@ those by hand in your terminal.
 - **A button does nothing / Delete fails** — you're probably on an **old server
   process**. The page shows a red "Server is running old code" banner in this case.
   Fix: `./start.sh` (it stops the old process and starts the current one).
-- **Delete is greyed out** — that branch is the current branch, `main`, or checked
-  out in another worktree. Switch away / remove the worktree first.
+- **A button is greyed out** — hover it; the tooltip says why (current branch,
+  checked out in another worktree, nothing to push, no commits for a PR, …).
+- **"Pull request info could not be loaded"** — GitHub timed out or `gh` isn't
+  logged in (`gh auth status`). Press **Retry**; older PR data stays on screen.
 
 ## Safety notes
 

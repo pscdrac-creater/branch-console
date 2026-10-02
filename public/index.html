@@ -4,12 +4,16 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Branch Console</title>
+<link rel="icon" href="/icon.svg" />
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --panel2: #1c2230; --border: #30363d;
-    --text: #e6edf3; --muted: #8b949e; --accent: #2f81f7; --accent-d: #1f6feb;
-    --green: #3fb950; --red: #f85149; --amber: #d29922; --purple: #a371f7;
-    --radius: 9px; --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --bg: #0b0f14; --panel: #131920; --panel2: #1a212b; --border: #2a323d; --border2: #3d4856;
+    --text: #e8edf3; --text2: #b6c0cc; --muted: #8894a3; --faint: #5f6b7a;
+    --accent: #4c9aff; --accent-d: #2f7de0;
+    --green: #3fb950; --red: #f85149; --amber: #e3b341; --purple: #b392f0;
+    --radius: 10px; --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    /* one row = these six columns; the column header uses the same template so they line up */
+    --cols: minmax(280px, 1fr) 110px 120px 180px 160px 320px;
   }
   * { box-sizing: border-box; }
   body {
@@ -18,212 +22,275 @@
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  button, input { font: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 20px 80px; }
-
-  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
-  header h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
-  header h1 .dot { color: var(--accent); }
-  .repo { color: var(--muted); font: 12px/1 var(--mono); }
+  .wrap { max-width: 1560px; margin: 0 auto; padding: 0 20px 120px; }
   .spacer { flex: 1; }
+  .muted { color: var(--muted); } .faint { color: var(--faint); }
+  .mono { font-family: var(--mono); }
 
-  .subbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    margin: 14px 0 18px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
-  .lbl { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  /* ── sticky top: title bar, toolbar, column header ── */
+  .top { position: sticky; top: 0; z-index: 20; background: var(--bg); padding-top: 16px; }
+  .bar1 { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }
+  .bar1 h1 { font-size: 18px; margin: 0; letter-spacing: .2px; display: flex; align-items: center; gap: 9px; }
+  .bar1 h1 img { width: 22px; height: 22px; border-radius: 6px; }
+  .repo { color: var(--text2); font: 600 13px/1 var(--mono); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; border: 1px solid var(--border); background: var(--panel); color: var(--text2); }
+  .chip b { font: 600 12px/1 var(--mono); color: var(--text); }
+  .chip.dirty { color: var(--amber); border-color: #4d3f18; }
+  .chip.clean { color: var(--green); border-color: #1f3d28; }
+  .fresh { color: var(--muted); font-size: 12.5px; }
+  .fresh .old { color: var(--amber); }
 
-  /* segmented toggle */
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
-  .seg button { background: transparent; color: var(--muted); border: 0; padding: 6px 13px;
-    font: 12px/1 var(--mono); cursor: pointer; }
+  .bar2 { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin-top: 14px; }
+  .views { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+  .view { background: var(--panel); color: var(--text2); border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 12px; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+  .view:hover { border-color: var(--border2); color: var(--text); }
+  .view .n { font: 600 11.5px/1 var(--mono); color: var(--muted); }
+  .view.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .view.on .n { color: #dbe9ff; }
+  .view.attn:not(.on) .n { color: var(--amber); }
+  .minef { display: inline-flex; align-items: center; gap: 6px; color: var(--text2); font-size: 13px; cursor: pointer; user-select: none; }
+  .minef input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .search { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 8px;
+    padding: 6px 11px; width: 240px; font-size: 13px; }
+  .search::placeholder { color: var(--faint); }
+  .lbl { color: var(--muted); font-size: 12.5px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { background: var(--panel); color: var(--muted); border: 0; padding: 6px 12px; font: 12.5px/1.2 var(--mono); cursor: pointer; }
   .seg button.on { background: var(--accent); color: #fff; }
   .seg button:not(.on):hover { background: var(--panel2); color: var(--text); }
 
-  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 999px;
-    font-size: 11.5px; border: 1px solid var(--border); background: var(--panel2); color: var(--muted); }
-  .chip.cur { color: var(--green); border-color: #243; }
-  .chip.dirty { color: var(--amber); border-color: #432; }
-  .chip.clean { color: var(--green); border-color: #243; }
+  .colhead { display: grid; grid-template-columns: var(--cols); gap: 0 16px; padding: 14px 16px 8px 20px; margin-top: 4px;
+    border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .7px; }
+  .colhead span:last-child { text-align: right; }
 
-  .minef { display: inline-flex; align-items: center; gap: 6px; color: var(--muted);
-    font-size: 12.5px; cursor: pointer; user-select: none; }
-  .minef input { accent-color: var(--accent); width: 14px; height: 14px; }
+  /* ── banners ── */
+  .banner { margin: 14px 0 0; padding: 10px 14px; border-radius: var(--radius); font-size: 13.5px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .banner.warn { background: rgba(227,179,65,.1); border: 1px solid #4d3f18; color: #f0d58a; }
+  .banner.bad { background: rgba(248,81,73,.1); border: 1px solid #79302c; color: #ffb4ad; }
+  .banner code { background: #06090d; padding: 1px 6px; border-radius: 4px; font-family: var(--mono); color: var(--text); }
+  .banner .btn { margin-left: auto; }
+  .banner .btn + .btn { margin-left: 0; }
 
-  .stalebanner { margin: 14px 0 0; padding: 11px 14px; border-radius: var(--radius);
-    background: rgba(248,81,73,.12); border: 1px solid #79302c; color: #ffb4ad; font-size: 13px; }
-  .stalebanner code { background: #0a0d12; padding: 1px 6px; border-radius: 4px; font-family: var(--mono); color: #e6edf3; }
-
-  button.btn { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  /* ── buttons ── */
+  button.btn { background: var(--panel2); color: var(--text); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 6px 13px; font-size: 13px; cursor: pointer; white-space: nowrap; }
   button.btn:hover:not(:disabled) { border-color: var(--muted); }
-  button.btn:disabled { opacity: .4; cursor: not-allowed; }
+  button.btn:disabled { opacity: .45; cursor: not-allowed; }
   button.btn.accent { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.btn.accent:hover:not(:disabled) { background: var(--accent-d); }
+  button.btn.red { background: var(--red); border-color: var(--red); color: #fff; }
   button.btn.ghost { background: transparent; }
-  button.btn.danger { background: transparent; color: var(--red); }
-  button.btn.danger:hover:not(:disabled) { border-color: var(--red); background: rgba(248,81,73,.08); }
+  button.btn.attn { border-color: var(--amber); color: var(--amber); }
 
-  /* branch list */
-  .list { display: flex; flex-direction: column; gap: 8px; }
-  .row { display: flex; flex-direction: column;
-    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 15px; }
-  .row.current { border-color: #2c4a30; box-shadow: inset 3px 0 0 var(--green); }
-  .row-main { display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: center; }
-  .meta { min-width: 0; }
-  .name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .name .b { font: 600 14px/1 var(--mono); color: var(--text); }
-  .name .b.main { color: var(--purple); }
-  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
-  .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-  .tag.cur { color: var(--green); border-color: #243; }
-  .tag.merged { color: var(--purple); border-color: #3a2d52; }
-  .tag.lock { color: var(--amber); border-color: #432; }
-  .tag.draft { color: var(--amber); border-color: #432; }
-  .tag.notmine { color: var(--amber); border-color: #432; }
-  .sub { color: var(--muted); font-size: 12.5px; margin-top: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sub .sha { font-family: var(--mono); color: #6e7681; }
-  .ab { font-family: var(--mono); font-size: 12px; margin-left: 2px; }
-  .ab .up { color: var(--green); }
-  .ab .down { color: var(--red); }
-  .ab .even { color: #6e7681; }
-  .actions { display: flex; gap: 7px; align-items: center; }
+  /* ── groups + rows ── */
+  .group { margin-top: 22px; }
+  .group h2 { margin: 0 0 9px; font-size: 12.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--text2);
+    display: flex; align-items: baseline; gap: 9px; }
+  .group h2 .n { font: 600 12px/1 var(--mono); color: var(--muted); }
+  .group h2 small { font-size: 12.5px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--faint); }
+  .rows { display: flex; flex-direction: column; gap: 8px; }
 
-  /* worktree + port hint — its own line under the summary, never truncated */
-  .wtline { margin-top: 5px; font-size: 12px; color: var(--muted);
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .wt { color: var(--muted); }
-  .port { font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 4px;
-    border: 1px solid var(--border); background: var(--panel2); color: var(--muted); }
-  .port.fe.live { color: #58a6ff; border-color: #1f3a5f; }
-  .port.be.live { color: var(--green); border-color: #243; }
+  .row { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: inset 4px 0 0 var(--tone, var(--border2)); }
+  .row.tone-good { --tone: var(--green); } .row.tone-info { --tone: var(--accent); } .row.tone-warn { --tone: var(--amber); }
+  .row.tone-bad { --tone: var(--red); } .row.tone-done { --tone: #6e5aa8; } .row.tone-idle { --tone: var(--border2); }
+  .row.open { border-color: var(--border2); }
+  .row-main { display: grid; grid-template-columns: var(--cols); gap: 6px 16px; align-items: center; padding: 12px 16px 12px 20px; cursor: pointer; }
+  .row-main:hover { background: rgba(255,255,255,.018); border-radius: var(--radius); }
 
-  /* details dropdown — a floating popover anchored to the button, not an inline panel */
-  .caret { background: transparent; border: 1px solid var(--border); color: var(--muted);
-    border-radius: 7px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
-  .caret:hover, .caret.active { border-color: var(--muted); color: var(--text); }
-  .caret .chev { display: inline-block; transition: transform .15s; }
-  .caret.active .chev { transform: rotate(180deg); }
-  .dropdown { position: fixed; z-index: 60; width: min(432px, 94vw); max-height: 72vh; overflow: auto;
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 0 18px 16px; box-shadow: 0 14px 40px rgba(1,4,9,.65); display: none; }
-  .dropdown.show { display: block; }
-  .dropdown .det-sec { margin-top: 15px; }
-  .dd-head { position: sticky; top: 0; z-index: 1; background: var(--panel);
-    display: flex; align-items: center; gap: 10px; padding: 13px 0 10px; border-bottom: 1px solid var(--border); }
-  .dd-title { font: 600 13px/1 var(--mono); color: var(--text); word-break: break-all; }
-  .dd-x { margin-left: auto; flex: none; background: transparent; border: 0; color: var(--muted);
-    cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
-  .dd-x:hover { color: var(--text); }
-  .det-sec h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
-  .kv { display: grid; grid-template-columns: 78px 1fr; gap: 4px 10px; font-size: 12.5px; margin: 0; }
+  .cell { min-width: 0; font-size: 13px; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+  .cell::before { display: none; content: attr(data-label); color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+  .cell .up { color: var(--green); } .cell .down { color: #e0957a; } .cell .ok { color: var(--green); } .cell .warn { color: var(--amber); }
+  .cell .sub { font-size: 12px; }
+
+  .c-branch { gap: 4px; }
+  .l1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: 100%; }
+  .exp { background: transparent; border: 0; color: var(--muted); cursor: pointer; padding: 0; width: 14px; font-size: 11px; line-height: 1; transition: transform .12s; }
+  .row.open .exp { transform: rotate(90deg); color: var(--text); }
+  .bname { font: 600 14.5px/1.3 var(--mono); color: var(--text); word-break: break-all; }
+  .bname.main { color: var(--purple); }
+  .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .tag.cur { color: var(--green); border-color: #1f3d28; background: rgba(63,185,80,.08); }
+  .tag.notmine { color: var(--amber); border-color: #4d3f18; }
+  .l2 { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; padding-left: 22px; max-width: 100%; }
+  .verdict { font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--tone-c, var(--text2)); }
+  .verdict i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .tone-good .verdict { --tone-c: var(--green); } .tone-info .verdict { --tone-c: #7db7ff; } .tone-warn .verdict { --tone-c: var(--amber); }
+  .tone-bad .verdict { --tone-c: #ff7b72; } .tone-done .verdict { --tone-c: var(--purple); } .tone-idle .verdict { --tone-c: var(--muted); }
+  .hint { color: var(--text2); font-size: 12.5px; }
+  .l3 { color: var(--muted); font-size: 12.5px; padding-left: 22px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .pill { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; line-height: 1.6;
+    border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+  .pill.open, .pill.pass { color: var(--green); border-color: #1f3d28; }
+  .pill.draft, .pill.pending { color: var(--amber); border-color: #4d3f18; }
+  .pill.merged { color: var(--purple); border-color: #3a2d52; }
+  .pill.closed, .pill.fail { color: #ff7b72; border-color: #79302c; }
+  .prline { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .prline a { font: 600 13px/1 var(--mono); }
+
+  .wtname { font: 12.5px/1.3 var(--mono); color: var(--text2); word-break: break-all; }
+  .ports { display: flex; gap: 5px; flex-wrap: wrap; }
+  a.port { font: 11.5px/1.5 var(--mono); padding: 0 7px; border-radius: 5px; border: 1px solid var(--border); background: var(--panel2); }
+  a.port.fe { color: #7db7ff; border-color: #1f3a5f; } a.port.be { color: var(--green); border-color: #1f3d28; }
+  a.port:hover { text-decoration: none; border-color: currentColor; }
+
+  .c-act { flex-direction: row; gap: 6px; justify-content: flex-end; align-items: center; }
+  .act { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 7px;
+    padding: 5px 0; font-size: 12.5px; line-height: 1.3; cursor: pointer; white-space: nowrap; text-align: center; flex: none; }
+  .act:nth-child(1) { width: 56px; } .act:nth-child(2) { width: 68px; } .act:nth-child(3) { width: 62px; }
+  .act:nth-child(4) { width: 54px; } .act:nth-child(5) { width: 56px; }
+  a.act:hover { text-decoration: none; }
+  .act:hover:not(:disabled) { border-color: var(--muted); color: var(--text); }
+  .act:disabled { opacity: .32; cursor: not-allowed; }
+  .act.danger:hover:not(:disabled) { border-color: var(--red); color: #ff7b72; }
+  .act.sug { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .act.sug:hover:not(:disabled) { background: var(--accent-d); border-color: var(--accent-d); color: #fff; }
+  .act.sug.danger { background: transparent; border-color: var(--red); color: #ff7b72; }
+  .act.sug.danger:hover:not(:disabled) { background: rgba(248,81,73,.12); color: #ff7b72; border-color: var(--red); }
+  body.busy .act, body.busy .banner .btn { pointer-events: none; opacity: .5; }
+
+  /* expanded details */
+  .details { border-top: 1px solid var(--border); padding: 14px 20px 16px 42px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 18px 28px; }
+  .det h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); font-weight: 600; }
+  .det h4 span { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); margin-left: 6px; }
+  .commits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; }
+  .commits li { display: grid; grid-template-columns: 76px 1fr; gap: 0 8px; }
+  .commits .sha { font-family: var(--mono); color: var(--faint); }
+  .commits .who { color: var(--faint); }
+  .plus { color: var(--green); } .minus { color: #ff7b72; }
+  .kv { display: grid; grid-template-columns: 92px 1fr; gap: 4px 10px; font-size: 12.5px; margin: 0; }
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; color: var(--text); word-break: break-word; }
-  .kv dd.mono, .kv .mono { font-family: var(--mono); }
-  .muted { color: var(--muted); }
-  .portrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .pport { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px;
-    padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel2); }
-  .pport.fe { color: #58a6ff; border-color: #1f3a5f; }
-  .pport.be { color: var(--green); border-color: #243; }
-  .pport .pn { color: var(--muted); font-size: 10.5px; }
-  .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px;
-    font-size: 11px; border: 1px solid var(--border); color: var(--muted); }
-  .pill.open { color: var(--green); border-color: #243; }
-  .pill.draft, .pill.pending { color: var(--amber); border-color: #432; }
-  .pill.merged { color: var(--purple); border-color: #3a2d52; }
-  .pill.closed, .pill.fail { color: var(--red); border-color: #79302c; }
-  .pill.pass { color: var(--green); border-color: #243; }
+  .note { color: var(--text2); font-size: 12.5px; }
 
-  /* output panel */
-  .out { position: fixed; left: 0; right: 0; bottom: 0; background: #0a0d12; border-top: 1px solid var(--border);
-    max-height: 42vh; display: none; flex-direction: column; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 20px; }
+  .empty .btn { margin-top: 12px; }
+  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border2);
+    border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
+  @keyframes s { to { transform: rotate(360deg); } }
+
+  /* ── output panel ── */
+  .out { position: fixed; left: 0; right: 0; bottom: 0; background: #06090d; border-top: 1px solid var(--border2);
+    max-height: 42vh; display: none; flex-direction: column; z-index: 30; }
   .out.show { display: flex; }
   .out .head { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
   .out .head .ttl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
-  .out pre { margin: 0; padding: 12px 16px; overflow: auto; font: 12px/1.5 var(--mono); color: #c9d1d9; white-space: pre-wrap; }
-  .ok { color: var(--green); } .err { color: var(--red); }
+  .out pre { margin: 0; padding: 12px 16px; overflow: auto; font: 12.5px/1.5 var(--mono); color: #c9d1d9; white-space: pre-wrap; }
+  .okc { color: var(--green); } .errc { color: #ff7b72; }
 
-  /* modal */
-  .modal-bg { position: fixed; inset: 0; background: rgba(1,4,9,.7); display: none; align-items: center; justify-content: center; z-index: 50; }
+  /* ── modal ── */
+  .modal-bg { position: fixed; inset: 0; background: rgba(1,4,9,.72); display: none; align-items: center; justify-content: center; z-index: 50; }
   .modal-bg.show { display: flex; }
-  .modal { width: min(560px, 92vw); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
+  .modal { width: min(580px, 92vw); background: var(--panel); border: 1px solid var(--border2); border-radius: 12px; padding: 20px 22px; }
   .modal h3 { margin: 0 0 4px; font-size: 16px; }
-  .modal .desc { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
-  .cmd { background: #0a0d12; border: 1px solid var(--border); border-radius: 7px; padding: 11px 13px;
+  .modal .desc { color: var(--text2); font-size: 13px; margin-bottom: 14px; }
+  .modal .desc code, .minef code { font-family: var(--mono); font-size: 12px; }
+  .cmd { background: #06090d; border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px;
     font: 12.5px/1.6 var(--mono); color: #c9d1d9; white-space: pre-wrap; word-break: break-all; }
-  .warn { margin-top: 12px; padding: 9px 12px; border-radius: 7px; font-size: 12.5px;
-    background: rgba(210,153,34,.1); border: 1px solid #432; color: var(--amber); }
+  .mwarn { margin-top: 12px; padding: 9px 12px; border-radius: 8px; font-size: 12.5px;
+    background: rgba(227,179,65,.1); border: 1px solid #4d3f18; color: var(--amber); }
   .modal .field { margin-top: 12px; }
   .modal .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
-  .modal input, .modal textarea { width: 100%; background: #0a0d12; color: var(--text); border: 1px solid var(--border);
-    border-radius: 7px; padding: 8px 11px; font: 13px var(--mono); resize: vertical; }
+  .modal input[type=text], .modal textarea { width: 100%; background: #06090d; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 11px; font: 13px var(--mono); resize: vertical; }
   .modal .foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
 
-  .empty { color: var(--muted); text-align: center; padding: 40px; }
-  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border);
-    border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; }
-  @keyframes s { to { transform: rotate(360deg); } }
+  /* ── narrow windows: stack each row (branch / labelled facts / actions) ── */
+  @media (max-width: 1239px) {
+    .colhead { display: none; }
+    .top { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    .row-main { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
+    .c-branch, .c-act { grid-column: 1 / -1; }
+    .c-act { justify-content: flex-start; padding-left: 22px; }
+    .cell:not(.c-branch):not(.c-act)::before { display: block; }
+    .c-vs { padding-left: 22px; }
+    .details { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .row-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .c-push { padding-left: 0; } .c-pr { padding-left: 22px; }
+    .search { width: 100%; }
+    .c-act { flex-wrap: wrap; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1><span class="dot">●</span> Branch Console</h1>
-    <span class="repo" id="repoPath">…</span>
-    <span class="spacer"></span>
-    <span class="chip" id="curChip">…</span>
-    <span class="chip" id="dirtyChip" style="display:none"></span>
-  </header>
-
-  <div id="staleBanner" class="stalebanner" style="display:none"></div>
-
-  <div class="subbar">
-    <span class="lbl">Reset / Rebase target</span>
-    <div class="seg" id="seg">
-      <button data-t="main" class="on">main</button>
-      <button data-t="origin/main">origin/main</button>
+  <div class="top">
+    <div class="bar1">
+      <h1><img src="/icon.svg" alt="" /> Branch Console</h1>
+      <span class="repo" id="repoName">…</span>
+      <span class="chip" id="curChip" style="display:none"></span>
+      <span class="chip" id="dirtyChip" style="display:none"></span>
+      <span class="spacer"></span>
+      <span class="fresh" id="fresh"></span>
+      <button class="btn ghost" id="fetchBtn" title="git fetch --prune origin — get the latest from GitHub">Fetch</button>
+      <button class="btn ghost" id="refreshBtn" title="Re-read branches and pull requests (r)">Refresh</button>
     </div>
-    <label class="minef"><input type="checkbox" id="mineOnly" /> Mine only</label>
-    <span class="spacer"></span>
-    <span class="lbl" id="countLbl"></span>
-    <button class="btn ghost" id="fetchBtn">⟳ Fetch</button>
-    <button class="btn ghost" id="refreshBtn">↻ Refresh</button>
+    <div class="bar2">
+      <div class="views" id="views"></div>
+      <label class="minef" title="Only branches whose commits are yours"><input type="checkbox" id="mineOnly" /> Mine only</label>
+      <input class="search" id="q" type="search" placeholder="Search branches…   ( / )" autocomplete="off" spellcheck="false" />
+      <span class="spacer"></span>
+      <span class="lbl" title="Ahead / behind, Reset and Rebase all use this branch">Compare with</span>
+      <div class="seg" id="seg"></div>
+    </div>
+    <div id="banners"></div>
+    <div class="colhead" id="colhead"></div>
   </div>
 
-  <div class="list" id="list"><div class="empty">Loading branches…</div></div>
+  <div id="list"><div class="empty"><span class="spin"></span> &nbsp;Loading branches…</div></div>
 </div>
-
-<!-- per-branch details dropdown (floating popover) -->
-<div class="dropdown" id="dropdown"></div>
 
 <!-- confirm / pr modal -->
 <div class="modal-bg" id="modalBg">
-  <div class="modal" id="modal"></div>
+  <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
 </div>
 
 <!-- output panel -->
 <div class="out" id="out">
   <div class="head">
     <span class="ttl" id="outTitle">Output</span>
-    <span class="spacer" style="flex:1"></span>
-    <button class="btn ghost" onclick="document.getElementById('out').classList.remove('show')">✕ close</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="outClose">Close</button>
   </div>
   <pre id="outPre"></pre>
 </div>
 
 <script>
 const $ = (s) => document.querySelector(s);
-const CLIENT_VERSION = 4;
-let TARGET = 'main';
-let MINE_ONLY = false;
-let STATE = { current: '', dirty: false, main: 'main' };
-let CURRENT_ROWS = [];   // branches as currently rendered (post Mine-only filter), indexed for the dropdown
-let DD_OPEN = -1;        // index of the branch whose details dropdown is open, or -1
+const CLIENT_VERSION = 5;
+const AUTO_REFRESH_MS = 30000;
+
+// remembered per browser, so the page comes back the way you left it
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('bc.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('bc.' + k, JSON.stringify(v)); } catch { /* private mode */ } },
+};
+
+let TARGET = store.get('target', null);     // null until the first state load picks a default
+let VIEW = store.get('view', 'all');
+let MINE_ONLY = store.get('mine', false);
+let QUERY = '';
+let STATE = { current: '', dirty: false, main: 'main', mainBehind: 0, mainAhead: 0 };
+let DATA = { branches: [] };
+let OPEN = new Set(store.get('open', []));  // branch names whose details are expanded
+const DETAIL = {};                          // name → { key, loading } | { key, data }
+let LOADED_AT = 0, LOAD_ERR = '', LOADING = false, BUSY = false, LAST_SIG = '';
 
 const api = {
-  state:    () => fetch('/api/state').then(r => r.json()),
-  branches: (t) => fetch('/api/branches?target=' + encodeURIComponent(t)).then(r => r.json()),
+  state:    () => fetch('/api/state').then((r) => r.json()),
+  branches: (t, force) => fetch('/api/branches?target=' + encodeURIComponent(t) + (force ? '&force=1' : '')).then((r) => r.json()),
+  detail:   (name, t) => fetch('/api/branch?name=' + encodeURIComponent(name) + '&target=' + encodeURIComponent(t)).then((r) => r.json()),
   post:     async (p, body) => {
-    const res = await fetch('/api/' + p, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body || {}) });
+    const res = await fetch('/api/' + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     if (!res.ok) {
       if (res.status === 404)
         return { ok: false, error: `“/api/${p}” doesn’t exist on the running server — it’s on OLD code. Restart it: Ctrl-C in its terminal, then ./start.sh` };
@@ -233,218 +300,353 @@ const api = {
   },
 };
 
-function checkVersion(state) {
-  const el = $('#staleBanner');
-  if (state && state.version === CLIENT_VERSION) { el.style.display = 'none'; return; }
-  el.style.display = 'block';
-  el.innerHTML = `⚠ <b>Server is running old code</b> (server v${(state && state.version) || 1}, page v${CLIENT_VERSION}). ` +
-    `Newer buttons like <b>Delete</b> will fail until you restart it — <code>Ctrl-C</code> in its terminal, then <code>./start.sh</code>.`;
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+const num = (x) => Number(x || 0).toLocaleString('en-US');
+const plural = (x, w) => `${num(x)} ${w}${x === 1 ? '' : 's'}`;
+
+function ago(ms) {
+  if (!ms) return 'never';
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 10) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
 }
-
-function esc(s) { return (s || '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-// ── command previews (mirror server.js) ──
-const resetCmd  = (b) => b === STATE.current ? `git reset --hard ${TARGET}` : `git branch -f ${b} ${TARGET}`;
-const rebaseCmd = (b) => b === STATE.current ? `git rebase ${TARGET}` : `git rebase ${TARGET} ${b}`;
-const prCmd     = (b, hasTitle) => `git push -u origin ${b}\ngh pr create --base ${STATE.main} --head ${b} ${hasTitle ? '--title … --body …' : '--fill'}`;
-
-// ── render ──
-async function load() {
-  const [st, data] = await Promise.all([api.state(), api.branches(TARGET)]);
-  STATE = st;
-  checkVersion(st);
-  $('#repoPath').textContent = st.repo;
-  $('#curChip').className = 'chip cur';
-  $('#curChip').textContent = '⎇ ' + st.current;
-  const dc = $('#dirtyChip');
-  dc.style.display = 'inline-flex';
-  dc.className = 'chip ' + (st.dirty ? 'dirty' : 'clean');
-  dc.textContent = st.dirty ? '● uncommitted changes' : '✓ clean tree';
-  renderList(data);
-}
-
-let LAST_DATA = { branches: [] };
-function renderList(data) {
-  LAST_DATA = data;
-  closeDropdown(); // indices are about to change — never leave a stale dropdown open
-  const list = $('#list');
-  if (data.prError) console.warn('PR lookup:', data.prError);
-  const all = data.branches || [];
-  const rows = MINE_ONLY ? all.filter((b) => b.mine) : all;
-  CURRENT_ROWS = rows;
-  $('#countLbl').textContent = MINE_ONLY ? `${rows.length} of ${all.length} (mine)` : `${all.length} branches`;
-  if (!rows.length) { list.innerHTML = `<div class="empty">${all.length ? 'No branches match “Mine only”.' : 'No branches.'}</div>`; return; }
-
-  list.innerHTML = rows.map((b, i) => {
-    const isTargetSelf = b.name === TARGET || (TARGET === 'main' && b.name === STATE.main);
-    const locked = !!b.lockedAt;
-    const blockEdit = locked; // can't reset/rebase a branch checked out elsewhere
-
-    const ab = b.ahead === 0 && b.behind === 0
-      ? `<span class="even">≡ even with ${TARGET}</span>`
-      : `${b.ahead ? `<span class="up">↑${b.ahead}</span> ` : ''}${b.behind ? `<span class="down">↓${b.behind}</span> ` : ''}<span class="even">vs ${TARGET}</span>`;
-
-    const tags = [];
-    if (b.isCurrent) tags.push('<span class="tag cur">current</span>');
-    if (!b.mine) tags.push(`<span class="tag notmine" title="last commits by ${esc(b.author)} — not yours">by ${esc(b.author || '?')}</span>`);
-    if (b.merged && !b.isMain) tags.push('<span class="tag merged">merged</span>');
-    if (locked) tags.push(`<span class="tag lock" title="${esc(b.lockedAt)}">🔒 worktree</span>`);
-
-    const pr = b.pr
-      ? `<a href="${esc(b.pr.url)}" target="_blank" title="${esc(b.pr.title)}">#${b.pr.number}</a>${prStatePill(b.pr)}`
-      : '<span style="color:#6e7681">no PR</span>';
-
-    // dedicated "running on which port / in which worktree" line — always visible,
-    // never truncated by the summary line's ellipsis.
-    const wtLine = b.worktree
-      ? `<span class="wt" title="${esc(b.worktree)}">🖥 ${esc(b.worktreeName)}</span>` +
-        ((b.ports && b.ports.length)
-          ? ' ' + b.ports.map((p) => `<span class="port ${p.kind.toLowerCase()} live" title="${esc(p.proc)} · pid ${p.pid}">${p.kind} :${p.port}</span>`).join(' ')
-          : ' <span class="port" title="checked out here, but no dev server is listening">idle · nothing running</span>')
-      : '';
-
-    return `<div class="row ${b.isCurrent ? 'current' : ''}" id="row-${i}">
-      <div class="row-main">
-      <div class="meta">
-        <div class="name">
-          <span class="b ${b.isMain ? 'main' : ''}">${esc(b.name)}</span>
-          <span class="tags">${tags.join('')}</span>
-        </div>
-        <div class="sub">
-          <span class="sha">${esc(b.sha)}</span> · ${esc(b.subject)} · ${esc(b.rel)}
-          &nbsp; <span class="ab">${ab}</span> &nbsp; · PR: ${pr}
-        </div>
-        ${wtLine ? `<div class="wtline">${wtLine}</div>` : ''}
-      </div>
-      <div class="actions">
-        <button class="caret" onclick="openDropdown(${i}, this)" aria-expanded="false" title="branch, worktree/port & PR details"><span class="chev">▾</span> Details</button>
-        <button class="btn" ${blockEdit || isTargetSelf ? 'disabled' : ''} title="${blockEdit ? 'checked out in another worktree' : (isTargetSelf ? 'already the target' : 'git reset')}"
-          onclick="askReset('${esc(b.name)}')">↺ Reset</button>
-        <button class="btn" ${blockEdit || isTargetSelf ? 'disabled' : ''} title="${blockEdit ? 'checked out in another worktree' : (isTargetSelf ? 'already the target' : 'git rebase')}"
-          onclick="askRebase('${esc(b.name)}')">⤴ Rebase</button>
-        <button class="btn accent" ${b.isMain ? 'disabled' : ''} title="${b.isMain ? "can't PR main" : 'push & open PR'}"
-          onclick="askPR('${esc(b.name)}')">⬈ PR</button>
-        <button class="btn danger" ${b.isMain || b.isCurrent || locked ? 'disabled' : ''}
-          title="${b.isMain ? "can't delete main" : b.isCurrent ? 'currently checked out' : locked ? 'checked out in another worktree' : 'delete branch'}"
-          onclick="askDelete('${esc(b.name)}', ${b.upstream ? 'true' : 'false'})">🗑</button>
-      </div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-// small state pill next to the inline PR number
-function prStatePill(p) {
-  if (!p) return '';
-  if (p.isDraft) return ' <span class="pill draft">draft</span>';
-  if (p.state === 'MERGED') return ' <span class="pill merged">merged</span>';
-  if (p.state === 'CLOSED') return ' <span class="pill closed">closed</span>';
-  return ' <span class="pill open">open</span>';
-}
-
 function fmtDate(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
   catch { return iso; }
 }
 
-// expandable per-branch details: branch info · worktree & ports · PR status
-function rowDetails(b) {
+// ── command previews (mirror server.js) ──
+const resetCmd  = (b) => b === STATE.current ? `git reset --hard ${TARGET}` : `git branch -f ${b} ${TARGET}`;
+const rebaseCmd = (b) => b === STATE.current ? `git rebase ${TARGET}` : `git rebase ${TARGET} ${b}`;
+const prCmd     = (b) => `git push -u origin ${b}\ngh pr create --base ${STATE.main} --head ${b} --fill`;
+
+// ── load ──
+async function load({ force = false } = {}) {
+  if (LOADING) return;
+  LOADING = true;
+  $('#refreshBtn').innerHTML = '<span class="spin"></span>';
+  try {
+    let st;
+    if (TARGET === null) {                       // first visit: compare with the remote truth
+      st = await api.state();
+      TARGET = st.hasOriginMain ? 'origin/' + st.main : st.main;
+    }
+    const [st2, data] = await Promise.all([st || api.state(), api.branches(TARGET, force)]);
+    st = st2;
+    if (![st.main, 'origin/' + st.main].includes(TARGET) || (!st.hasOriginMain && TARGET !== st.main)) {
+      TARGET = st.hasOriginMain ? 'origin/' + st.main : st.main; // stored target no longer valid → reload with a good one
+      LOADING = false;
+      return await load({ force });
+    }
+    STATE = st; LOADED_AT = Date.now(); LOAD_ERR = '';
+    if (st.version !== CLIENT_VERSION) {         // old server: its data lacks what this page needs — say so, don't guess
+      renderBanners();
+      $('#list').innerHTML = '<div class="empty">Restart the server to see your branches.</div>';
+      return;
+    }
+    const { prAt, ...rest } = data;              // prAt changes on every lookup; don't redraw just for it
+    const sig = JSON.stringify([st.current, st.dirty, st.dirtyCount, st.mainBehind, st.mainAhead, st.version, rest]);
+    DATA = data;
+    renderHeader();
+    renderBanners();
+    if (sig !== LAST_SIG) { LAST_SIG = sig; renderList(); }
+  } catch (e) {
+    LOAD_ERR = 'Can’t reach the Branch Console server. Is it still running? Start it again with ./start.sh';
+    renderBanners();
+  } finally {
+    LOADING = false;
+    $('#refreshBtn').textContent = 'Refresh';
+    renderFresh();
+  }
+}
+
+// ── header, toolbar, banners ──
+function renderHeader() {
+  document.title = `Branch Console — ${STATE.repoName || ''}`;
+  $('#repoName').textContent = STATE.repoName || STATE.repo;
+  $('#repoName').title = STATE.repo;
+  const cur = $('#curChip');
+  cur.style.display = 'inline-flex';
+  cur.innerHTML = `on <b>${esc(STATE.current)}</b>`;
+  cur.title = 'The branch checked out in ' + STATE.repo;
+  const dc = $('#dirtyChip');
+  dc.style.display = 'inline-flex';
+  dc.className = 'chip ' + (STATE.dirty ? 'dirty' : 'clean');
+  dc.textContent = STATE.dirty ? `${plural(STATE.dirtyCount || 1, 'uncommitted file')}` : 'clean tree';
+
+  const targets = STATE.hasOriginMain ? ['origin/' + STATE.main, STATE.main] : [STATE.main];
+  $('#seg').innerHTML = targets.map((t) =>
+    `<button data-t="${esc(t)}" class="${t === TARGET ? 'on' : ''}" title="${t.startsWith('origin/') ? 'What is on GitHub (as of the last fetch)' : 'Your local copy of ' + esc(STATE.main)}">${esc(t)}</button>`).join('');
+  $('#colhead').innerHTML = ['Branch', 'vs ' + esc(TARGET), 'Pushed', 'Pull request', 'Running', 'Actions'].map((h) => `<span>${h}</span>`).join('');
+  $('#mineOnly').checked = MINE_ONLY;
+}
+
+function renderFresh() {
+  if (!LOADED_AT) { $('#fresh').textContent = ''; return; }
+  const f = STATE.fetchedAt;
+  const old = !f || Date.now() - f > 30 * 60 * 1000;   // origin/* is only as fresh as the last fetch
+  $('#fresh').innerHTML = `Updated ${ago(LOADED_AT)} · <span class="${old ? 'old' : ''}" title="${f ? esc(new Date(f).toLocaleString()) : ''} — origin/${esc(STATE.main)} is only as fresh as the last fetch">last fetch ${ago(f)}</span>`;
+  $('#fetchBtn').classList.toggle('attn', old);
+}
+
+function renderBanners() {
+  const out = [];
+  if (LOAD_ERR) out.push(`<div class="banner bad">${esc(LOAD_ERR)}</div>`);
+  if (LOADED_AT && STATE.version !== CLIENT_VERSION)
+    out.push(`<div class="banner bad"><span><b>The server is running old code</b> (server v${esc(STATE.version || 1)}, page v${CLIENT_VERSION}). ` +
+      `Some buttons will fail until you restart it: <code>Ctrl-C</code> in its terminal, then <code>./start.sh</code>.</span></div>`);
+  if (DATA.prError)
+    out.push(`<div class="banner warn"><span><b>Pull request info could not be loaded.</b> ` +
+      (DATA.prAt ? `Showing what GitHub said ${ago(DATA.prAt)}.` : `The “Pull request” column and the status of each branch may be wrong.`) +
+      ` <span class="muted">(${esc(DATA.prError)})</span></span><button class="btn" data-banner="retry">Retry</button></div>`);
+  if (LOADED_AT && TARGET === STATE.main && STATE.mainBehind > 0)
+    out.push(`<div class="banner warn"><span><b>You are comparing with local ${esc(STATE.main)}, which is ${plural(STATE.mainBehind, 'commit')} behind origin/${esc(STATE.main)}.</b> ` +
+      `The “ahead” numbers below are inflated, and Reset / Rebase would use that old code.</span>` +
+      `<button class="btn" data-banner="use-origin">Compare with origin/${esc(STATE.main)}</button>` +
+      `<button class="btn" data-banner="update-main">Update local ${esc(STATE.main)}</button></div>`);
+  $('#banners').innerHTML = out.join('');
+}
+
+// ── filtering ──
+const VIEWS = [
+  { key: 'all',     label: 'All',             test: () => true },
+  { key: 'attn',    label: 'Needs attention', test: (b) => b.status.tone === 'warn' || b.status.tone === 'bad' },
+  { key: 'pr',      label: 'Open PR',         test: (b) => b.pr && b.pr.state === 'OPEN' },
+  { key: 'cleanup', label: 'Clean-up',        test: (b) => b.status.group === 'cleanup' },
+];
+const GROUPS = [
+  { key: 'checkedout', title: 'Checked out',   sub: 'open in a worktree right now' },
+  { key: 'active',     title: 'Other work',    sub: () => `has commits that are not in ${TARGET}` },
+  { key: 'cleanup',    title: 'Safe to clean up', sub: () => `nothing here that is not already in ${TARGET}` },
+  { key: 'base',       title: 'Base branch',   sub: '' },
+];
+
+function baseRows() {
+  let rows = DATA.branches || [];
+  if (MINE_ONLY) rows = rows.filter((b) => b.mine);
+  const q = QUERY.trim().toLowerCase();
+  if (q) rows = rows.filter((b) =>
+    [b.name, b.subject, b.author, b.worktreeName, b.status.label, b.pr ? '#' + b.pr.number + ' ' + b.pr.title : '']
+      .join(' ').toLowerCase().includes(q));
+  return rows;
+}
+const findBranch = (name) => (DATA.branches || []).find((b) => b.name === name);
+
+// ── cells ──
+function vsCell(b) {
+  if (b.name === TARGET) return '<span class="faint">this is the target</span>';
+  if (!b.ahead && !b.behind) return '<span class="muted">= even</span>';
+  return (b.ahead ? `<span class="up">↑ ${num(b.ahead)} ahead</span>` : '<span class="faint">0 ahead</span>') +
+    (b.behind ? `<span class="down">↓ ${num(b.behind)} behind</span>` : '');
+}
+
+function pushCell(b) {
+  const p = b.push, risk = b.ahead > 0 ? 'warn' : 'muted'; // only worrying if the branch has work of its own
+  const up = b.upstream ? esc(b.upstream) : '';
+  // nothing of its own → whatever is "not pushed" is in the target already, so nothing can be lost
+  const safe = !b.ahead && b.name !== TARGET ? `<span class="sub faint">already in ${esc(TARGET)}</span>` : '';
+  switch (p.kind) {
+    case 'synced':   return `<span class="ok" title="same as ${up}">✓ in sync</span>`;
+    case 'unpushed': return `<span class="${risk}" title="${plural(p.ahead, 'commit')} not on ${up}">↑ ${num(p.ahead)} not pushed</span>${safe}`;
+    case 'behind':   return `<span class="muted" title="${up} has ${plural(p.behind, 'newer commit')}">↓ ${num(p.behind)} to pull</span>`;
+    case 'diverged': return `<span class="warn" title="local and ${up} have different commits">↑ ${num(p.ahead)} ↓ ${num(p.behind)} diverged</span>`;
+    case 'gone':     return `<span class="${risk}" title="${up} no longer exists on GitHub">remote deleted</span>${safe}`;
+    default:         return `<span class="${risk}" title="this branch exists only on this machine">never pushed</span>${safe}`;
+  }
+}
+
+function prStatePill(p) {
+  if (p.state === 'MERGED') return '<span class="pill merged">merged</span>';
+  if (p.state === 'CLOSED') return '<span class="pill closed">closed</span>';
+  if (p.isDraft) return '<span class="pill draft">draft</span>';
+  return '<span class="pill open">open</span>';
+}
+function checksPill(p) {
+  const c = p.checks;
+  if (!c) return '<span class="pill">no checks</span>';
+  const cls = c.overall === 'passing' ? 'pass' : c.overall === 'failing' ? 'fail' : 'pending';
+  const txt = c.overall === 'passing' ? `✓ ${c.pass}/${c.total} checks` : c.overall === 'failing' ? `✕ ${c.fail} failing` : `${c.pending} running`;
+  return `<span class="pill ${cls}" title="${c.pass} passed · ${c.fail} failed · ${c.pending} running">${txt}</span>`;
+}
+function reviewPill(p) {
+  if (p.reviewDecision === 'APPROVED') return '<span class="pill pass">approved</span>';
+  if (p.reviewDecision === 'CHANGES_REQUESTED') return '<span class="pill fail">changes requested</span>';
+  if (p.reviewDecision === 'REVIEW_REQUIRED') return '<span class="pill pending">needs review</span>';
+  return '';
+}
+
+function prCell(b) {
+  const p = b.pr;
+  if (!p) return DATA.prError && !DATA.prAt ? '<span class="faint" title="GitHub could not be reached">unknown</span>' : '<span class="faint">no PR</span>';
+  const link = `<a href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)}">#${p.number}</a>`;
+  if (p.state === 'OPEN')
+    return `<span class="prline">${link}${prStatePill(p)}</span><span class="prline">${checksPill(p)}${reviewPill(p)}</span>`;
+  const earlier = !p.atTip ? '<span class="sub faint" title="This PR was for older commits; the branch has moved since">an earlier PR</span>' : '';
+  return `<span class="prline">${link}${prStatePill(p)}</span>${earlier}`;
+}
+
+function runCell(b) {
+  if (!b.worktree) return '<span class="faint">not checked out</span>';
+  const ports = (b.ports && b.ports.length)
+    ? `<span class="ports">${b.ports.map((p) =>
+        `<a class="port ${p.kind.toLowerCase()}" href="http://localhost:${p.port}" target="_blank" rel="noopener" title="${esc(p.proc)} · pid ${p.pid} — open localhost:${p.port}">${p.kind} :${p.port}</a>`).join('')}</span>`
+    : '<span class="sub faint" title="checked out here, but no dev server is listening">nothing running</span>';
+  return `<span class="wtname" title="${esc(b.worktree)}">${esc(b.worktreeName)}</span>${ports}`;
+}
+
+function actionsCell(b) {
+  const sug = b.status.action;
+  const locked = !!b.lockedAt, isTarget = b.name === TARGET || (TARGET === STATE.main && b.isMain);
+  const btn = (act, label, disabled, title, cls = '') =>
+    `<button class="act ${cls}${sug === act ? ' sug' : ''}" data-act="${act}" ${disabled ? 'disabled' : ''} title="${esc(title)}">${label}</button>`;
+  const inWt = 'checked out in another worktree (' + (b.worktreeName || '') + ') — do it there';
+
+  let first;
+  if (b.isMain) {
+    first = btn('update-main', 'Update', !STATE.mainBehind, STATE.mainBehind ? `fast-forward local ${STATE.main} to origin/${STATE.main}` : `local ${STATE.main} is up to date with origin/${STATE.main}`);
+  } else {
+    const k = b.push.kind, can = k === 'local' || k === 'unpushed' || k === 'gone';
+    first = btn('push', 'Push', !can, can ? `git push -u origin ${b.name}`
+      : k === 'synced' ? 'nothing to push — already in sync'
+      : k === 'behind' ? 'the remote branch is ahead — pull first' : 'local and remote differ — push from your terminal');
+  }
+  const pr = b.pr && (b.pr.state === 'OPEN' || sug === 'view-pr')
+    ? `<a class="act${sug === 'view-pr' ? ' sug' : ''}" href="${esc(b.pr.url)}" target="_blank" rel="noopener" title="open PR #${b.pr.number} on GitHub">View PR</a>`
+    : btn('pr', 'Open PR', b.isMain || !b.ahead, b.isMain ? `can't open a PR for ${STATE.main}`
+      : !b.ahead ? `nothing to open a PR for — no commits that are not in ${TARGET}` : 'push the branch and open a pull request');
+  const moveOff = locked ? inWt : isTarget ? 'this is the target' : '';
+  return first + pr +
+    btn('rebase', 'Rebase', !!moveOff, moveOff || `replay this branch on top of ${TARGET}`) +
+    btn('reset', 'Reset', !!moveOff, moveOff || `make this branch identical to ${TARGET}`) +
+    btn('delete', 'Delete', b.isMain || b.isCurrent || locked,
+      b.isMain ? `can't delete ${STATE.main}` : b.isCurrent ? 'this branch is checked out — switch away first' : locked ? inWt : 'delete this branch', 'danger');
+}
+
+// ── expanded details ──
+function detailsHtml(b) {
+  const d = DETAIL[b.name];
+  let commits;
+  if (!d || d.loading) commits = '<div class="note"><span class="spin"></span> &nbsp;Loading commits…</div>';
+  else if (!d.data.ok) commits = `<div class="note">Could not load commits: ${esc(d.data.error || 'unknown error')}</div>`;
+  else if (!d.data.commits.length) commits = `<div class="note">No commits of its own — everything on this branch is already in ${esc(TARGET)}.</div>`;
+  else commits = `<ul class="commits">${d.data.commits.map((c) =>
+      `<li><span class="sha">${esc(c.sha)}</span><span>${esc(c.subject)} <span class="who">· ${esc(c.author)} · ${esc(c.rel)}</span></span></li>`).join('')}</ul>` +
+      (d.data.more ? `<div class="note faint" style="margin-top:6px">Showing the newest ${d.data.commits.length}.</div>` : '');
+  const st = d && d.data && d.data.ok && d.data.commits.length ? d.data.stat : null;
+  const stat = st ? `<span>${plural(st.files, 'file')} · <span class="plus">+${num(st.insertions)}</span> <span class="minus">−${num(st.deletions)}</span></span>` : '';
+
+  const remote = b.upstream
+    ? `<span class="mono">${esc(b.upstream)}</span> ${b.push.kind === 'gone' ? '(deleted on GitHub)' : esc(b.track)}`
+    : 'none — never pushed';
+  const ports = !b.worktree ? '' : (b.ports && b.ports.length)
+    ? b.ports.map((p) => `${p.kind} <a href="http://localhost:${p.port}" target="_blank" rel="noopener">localhost:${p.port}</a> <span class="faint">${esc(p.proc || '')} · pid ${p.pid}</span>`).join('<br>')
+    : 'nothing running' + (b.expectedPorts ? ` <span class="faint">(usually FE :${b.expectedPorts.fe} · BE :${b.expectedPorts.be})</span>` : '');
   const branch = `<dl class="kv">
-    <dt>SHA</dt><dd class="mono">${esc(b.sha)}</dd>
-    <dt>Subject</dt><dd>${esc(b.subject || '—')}</dd>
-    <dt>Author</dt><dd>${esc(b.author || '?')}${b.authorEmail ? ` <span class="mono muted">&lt;${esc(b.authorEmail)}&gt;</span>` : ''}</dd>
+    <dt>Last commit</dt><dd><span class="mono faint">${esc(b.sha)}</span> ${esc(b.subject || '—')}</dd>
+    <dt>Author</dt><dd>${esc(b.author || '?')}${b.authorEmail ? ` <span class="mono faint">&lt;${esc(b.authorEmail)}&gt;</span>` : ''}</dd>
     <dt>Updated</dt><dd>${esc(b.rel)}</dd>
-    <dt>vs ${esc(TARGET)}</dt><dd class="mono">${b.ahead ? `↑${b.ahead} ` : ''}${b.behind ? `↓${b.behind} ` : ''}${!b.ahead && !b.behind ? 'even' : ''}</dd>
-    <dt>Upstream</dt><dd class="mono">${b.upstream ? esc(b.upstream) + (b.track ? ' ' + esc(b.track) : '') : 'none'}</dd>
-    <dt>Merged</dt><dd>${b.merged ? 'yes' : 'no'}</dd>
+    <dt>Remote branch</dt><dd>${remote}</dd>
+    <dt>Worktree</dt><dd>${b.worktree ? `<span class="mono">${esc(b.worktree)}</span>` : 'not checked out anywhere'}</dd>
+    ${b.worktree ? `<dt>Dev servers</dt><dd>${ports}</dd>` : ''}
   </dl>`;
 
-  let wt;
-  if (!b.worktree) {
-    wt = '<div class="muted" style="font-size:12.5px">Not checked out in any worktree.</div>';
-  } else {
-    const ports = (b.ports && b.ports.length)
-      ? `<div class="portrow">${b.ports.map((p) =>
-          `<span class="pport ${p.kind.toLowerCase()}" title="pid ${p.pid} · ${esc(p.cwd || '')}">${p.kind} :${p.port} <span class="pn">${esc(p.proc || 'proc')}</span></span>`).join('')}</div>`
-      : `<div class="muted" style="font-size:12.5px;margin-top:8px">No dev server running.${b.expectedPorts ? ` <span class="mono">expected FE :${b.expectedPorts.fe} · BE :${b.expectedPorts.be}</span>` : ''}</div>`;
-    wt = `<dl class="kv"><dt>Path</dt><dd class="mono">${esc(b.worktree)}</dd></dl>${ports}`;
-  }
-
-  let prs;
+  let pr;
   if (b.pr) {
     const p = b.pr;
-    const checks = p.checks
-      ? `<span class="pill ${p.checks.overall === 'passing' ? 'pass' : p.checks.overall === 'failing' ? 'fail' : 'pending'}" title="${p.checks.pass} passed · ${p.checks.fail} failed · ${p.checks.pending} pending">${p.checks.overall} · ${p.checks.pass}/${p.checks.total}</span>`
-      : '<span class="pill">no checks</span>';
-    const review = p.reviewDecision
-      ? `<span class="pill ${p.reviewDecision === 'APPROVED' ? 'pass' : p.reviewDecision === 'CHANGES_REQUESTED' ? 'fail' : 'pending'}">${esc(p.reviewDecision.toLowerCase().replace(/_/g, ' '))}</span>`
-      : '<span class="muted">—</span>';
-    prs = `<dl class="kv">
-      <dt>PR</dt><dd><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${prStatePill(p)}</dd>
+    pr = `<dl class="kv">
+      <dt>PR</dt><dd><a href="${esc(p.url)}" target="_blank" rel="noopener">#${p.number}</a> ${prStatePill(p)}${!p.atTip && p.state !== 'OPEN' ? ' <span class="faint">for older commits</span>' : ''}</dd>
       <dt>Title</dt><dd>${esc(p.title || '—')}</dd>
-      <dt>Base</dt><dd class="mono">${esc(p.baseRefName || STATE.main)}</dd>
-      <dt>Mergeable</dt><dd>${esc((p.mergeable || 'unknown').toLowerCase())}</dd>
-      <dt>Checks</dt><dd>${checks}</dd>
-      <dt>Review</dt><dd>${review}</dd>
+      <dt>Into</dt><dd class="mono">${esc(p.baseRefName || STATE.main)}</dd>
+      ${p.state === 'OPEN' ? `<dt>Conflicts</dt><dd>${p.mergeable === 'CONFLICTING' ? '<span class="pill fail">has conflicts</span>' : p.mergeable === 'MERGEABLE' ? 'none' : 'not known yet'}</dd>` : ''}
+      <dt>Checks</dt><dd>${checksPill(p)}</dd>
+      <dt>Review</dt><dd>${reviewPill(p) || '<span class="faint">no review yet</span>'}</dd>
       <dt>Updated</dt><dd>${esc(fmtDate(p.updatedAt))}</dd>
     </dl>`;
   } else {
-    prs = `<div class="muted" style="font-size:12.5px">No pull request.${b.isMain ? '' : ` <a href="#" onclick="askPR('${esc(b.name)}');return false;">Open one →</a>`}</div>`;
+    pr = `<div class="note">No pull request for this branch.</div>`;
   }
 
-  return `<div class="det-sec"><h4>Branch</h4>${branch}</div>
-    <div class="det-sec"><h4>Worktree &amp; ports</h4>${wt}</div>
-    <div class="det-sec"><h4>Pull request</h4>${prs}</div>`;
+  return `<div class="det"><h4>Commits not in ${esc(TARGET)}<span>${stat}</span></h4>${commits}</div>
+    <div class="det"><h4>Branch</h4>${branch}</div>
+    <div class="det"><h4>Pull request</h4>${pr}</div>`;
 }
 
-// ── details dropdown (floating popover) ──
-function closeDropdown() {
-  const dd = $('#dropdown');
-  if (dd) dd.classList.remove('show');
-  DD_OPEN = -1;
-  document.querySelectorAll('.caret.active').forEach((c) => {
-    c.classList.remove('active');
-    c.setAttribute('aria-expanded', 'false');
-  });
+async function ensureDetail(b) {
+  const key = b.fullSha + '|' + TARGET;
+  if (DETAIL[b.name] && DETAIL[b.name].key === key) return;
+  DETAIL[b.name] = { key, loading: true };
+  const data = await api.detail(b.name, TARGET).catch(() => ({ ok: false, error: 'server not reachable' }));
+  if (!DETAIL[b.name] || DETAIL[b.name].key !== key) return; // superseded by a newer request
+  DETAIL[b.name] = { key, data };
+  const row = [...document.querySelectorAll('.row')].find((r) => r.dataset.name === b.name);
+  const det = row && row.querySelector('.details');
+  if (det) det.innerHTML = detailsHtml(b);
 }
 
-function openDropdown(i, btn) {
-  const dd = $('#dropdown');
-  if (DD_OPEN === i && dd.classList.contains('show')) { closeDropdown(); return; } // toggle off
-  closeDropdown();
-  const b = CURRENT_ROWS[i];
-  if (!b || !dd) return;
-  dd.innerHTML = `<div class="dd-head"><span class="dd-title">⎇ ${esc(b.name)}</span>` +
-    `<button class="dd-x" onclick="closeDropdown()" title="close">✕</button></div>${rowDetails(b)}`;
-  dd.classList.add('show');
-  DD_OPEN = i;
-  btn.classList.add('active');
-  btn.setAttribute('aria-expanded', 'true');
-  positionDropdown(btn, dd);
+// ── list ──
+function rowHtml(b) {
+  const open = OPEN.has(b.name);
+  if (open) ensureDetail(b);
+  const tags = [];
+  if (b.isCurrent) tags.push('<span class="tag cur">current</span>');
+  if (!b.mine) tags.push(`<span class="tag notmine" title="the commits here are by ${esc(b.author)}, not you — be careful">by ${esc(b.author || '?')}</span>`);
+  const s = b.status;
+  return `<article class="row tone-${esc(s.tone)}${open ? ' open' : ''}" data-name="${esc(b.name)}">
+    <div class="row-main" title="Click for details">
+      <div class="cell c-branch">
+        <div class="l1"><button class="exp" data-act="toggle" aria-expanded="${open}" aria-label="details for ${esc(b.name)}">▶</button>
+          <span class="bname${b.isMain ? ' main' : ''}">${esc(b.name)}</span>${tags.join('')}</div>
+        <div class="l2"><span class="verdict"><i></i>${esc(s.label)}</span><span class="hint">${esc(s.hint)}</span></div>
+        <div class="l3" title="${esc(b.subject)}">${esc(b.subject)} · ${esc(b.rel)}</div>
+      </div>
+      <div class="cell c-vs" data-label="vs ${esc(TARGET)}">${vsCell(b)}</div>
+      <div class="cell c-push" data-label="Pushed">${pushCell(b)}</div>
+      <div class="cell c-pr" data-label="Pull request">${prCell(b)}</div>
+      <div class="cell c-run" data-label="Running">${runCell(b)}</div>
+      <div class="cell c-act">${actionsCell(b)}</div>
+    </div>
+    ${open ? `<div class="details">${detailsHtml(b)}</div>` : ''}
+  </article>`;
 }
 
-function positionDropdown(btn, dd) {
-  const r = btn.getBoundingClientRect();
-  const w = dd.offsetWidth, h = dd.offsetHeight, gap = 6, pad = 8;
-  let left = Math.max(pad, Math.min(r.right - w, window.innerWidth - w - pad)); // right-align to button, keep on-screen
-  let top = r.bottom + gap;
-  if (top + h > window.innerHeight - pad) top = Math.max(pad, r.top - gap - h); // flip above if it won't fit below
-  dd.style.left = left + 'px';
-  dd.style.top = top + 'px';
+function renderList() {
+  const base = baseRows();
+  if (!VIEWS.some((v) => v.key === VIEW)) VIEW = 'all';
+  $('#views').innerHTML = VIEWS.map((v) => {
+    const n = base.filter(v.test).length;
+    return `<button class="view${v.key === VIEW ? ' on' : ''}${v.key === 'attn' && n ? ' attn' : ''}" data-view="${v.key}">${v.label}<span class="n">${n}</span></button>`;
+  }).join('');
+
+  const rows = base.filter(VIEWS.find((v) => v.key === VIEW).test);
+  const list = $('#list');
+  if (!rows.length) {
+    const total = (DATA.branches || []).length;
+    const filtered = MINE_ONLY || QUERY.trim() || VIEW !== 'all';
+    list.innerHTML = `<div class="empty">${total && filtered ? 'No branches match these filters.<br><button class="btn" data-clear="1">Show all branches</button>' : 'No branches.'}</div>`;
+    return;
+  }
+  list.innerHTML = GROUPS.map((g) => {
+    const rs = rows.filter((b) => b.status.group === g.key);
+    if (!rs.length) return '';
+    const sub = typeof g.sub === 'function' ? g.sub() : g.sub;
+    return `<section class="group"><h2>${g.title}<span class="n">${rs.length}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</h2>
+      <div class="rows">${rs.map(rowHtml).join('')}</div></section>`;
+  }).join('');
 }
 
-// close the dropdown on outside click, scroll, resize, or Escape
-document.addEventListener('click', (e) => {
-  if (DD_OPEN < 0) return;
-  if ($('#dropdown').contains(e.target) || e.target.closest('.caret')) return;
-  closeDropdown();
-});
-window.addEventListener('scroll', () => { if (DD_OPEN >= 0) closeDropdown(); }, true);
-window.addEventListener('resize', () => { if (DD_OPEN >= 0) closeDropdown(); });
+function toggleRow(name) {
+  if (OPEN.has(name)) OPEN.delete(name); else OPEN.add(name);
+  store.set('open', [...OPEN]);
+  renderList();
+}
 
 // ── modal ──
 function closeModal() { $('#modalBg').classList.remove('show'); }
+const modalOpen = () => $('#modalBg').classList.contains('show');
 $('#modalBg').addEventListener('click', (e) => { if (e.target === $('#modalBg')) closeModal(); });
 
 function confirmModal({ title, desc, command, warn, confirmLabel, danger, onConfirm }) {
@@ -452,14 +654,15 @@ function confirmModal({ title, desc, command, warn, confirmLabel, danger, onConf
     <h3>${esc(title)}</h3>
     <div class="desc">${esc(desc || '')}</div>
     <div class="cmd">${esc(command)}</div>
-    ${warn ? `<div class="warn">⚠ ${esc(warn)}</div>` : ''}
+    ${warn ? `<div class="mwarn">⚠ ${esc(warn)}</div>` : ''}
     <div class="foot">
       <button class="btn ghost" id="mCancel">Cancel</button>
-      <button class="btn ${danger ? '' : 'accent'}" id="mOk" style="${danger ? 'background:var(--red);border-color:var(--red);color:#fff' : ''}">${esc(confirmLabel || 'Run')}</button>
+      <button class="btn ${danger ? 'red' : 'accent'}" id="mOk">${esc(confirmLabel || 'Run')}</button>
     </div>`;
   $('#modalBg').classList.add('show');
   $('#mCancel').onclick = closeModal;
   $('#mOk').onclick = () => { closeModal(); onConfirm(); };
+  (danger ? $('#mCancel') : $('#mOk')).focus();
 }
 
 function askReset(b) {
@@ -488,16 +691,38 @@ function askRebase(b) {
   });
 }
 
+function askPush(b) {
+  confirmModal({
+    title: `Push “${b}” to GitHub`,
+    desc: 'Uploads this branch’s commits to origin. Never forced — if the remote has different commits, it fails and changes nothing.',
+    command: `git push -u origin ${b}`,
+    confirmLabel: 'Push',
+    onConfirm: () => act('push', { branch: b }, `Push ${b}`),
+  });
+}
+
+function askUpdateMain() {
+  const m = STATE.main;
+  confirmModal({
+    title: `Update local ${m}`,
+    desc: `Fast-forwards local ${m} to origin/${m} (${plural(STATE.mainBehind, 'commit')} behind). Your checked-out branch is not touched.`,
+    command: STATE.current === m ? `git pull --ff-only origin ${m}` : `git fetch origin ${m}:${m}`,
+    confirmLabel: `Update ${m}`,
+    warn: STATE.mainAhead > 0 ? `Local ${m} has ${plural(STATE.mainAhead, 'commit')} of its own, so git will refuse the fast-forward and change nothing.` : '',
+    onConfirm: () => act('update-main', {}, `Update local ${m}`),
+  });
+}
+
 function askPR(b) {
   $('#modal').innerHTML = `
     <h3>Open PR · “${esc(b)}” → ${esc(STATE.main)}</h3>
     <div class="desc">Pushes the branch, then creates the PR. Leave fields blank to auto-fill from commits.</div>
-    <div class="cmd">${esc(prCmd(b, false))}</div>
-    <div class="field"><label>Title (optional)</label><input id="prTitle" placeholder="auto-fill from commits" /></div>
+    <div class="cmd">${esc(prCmd(b))}</div>
+    <div class="field"><label>Title (optional)</label><input type="text" id="prTitle" placeholder="auto-fill from commits" /></div>
     <div class="field"><label>Body (optional)</label><textarea id="prBody" rows="4" placeholder="auto-fill from commits"></textarea></div>
     <div class="foot">
       <button class="btn ghost" id="mCancel">Cancel</button>
-      <button class="btn accent" id="mOk">Push & Create PR</button>
+      <button class="btn accent" id="mOk">Push &amp; create PR</button>
     </div>`;
   $('#modalBg').classList.add('show');
   $('#mCancel').onclick = closeModal;
@@ -506,18 +731,21 @@ function askPR(b) {
     closeModal();
     act('pr', { branch: b, title, body }, `Open PR for ${b}`);
   };
+  $('#prTitle').focus();
 }
 
 function askDelete(b, hasRemote) {
+  const br = findBranch(b);
+  const risky = br && br.status.group !== 'cleanup';
   $('#modal').innerHTML = `
     <h3>Delete branch “${esc(b)}”</h3>
     <div class="desc">Removes the local branch (recoverable via <code>git reflog</code> for a while).</div>
     <div class="cmd" id="delCmd">git branch -D ${esc(b)}</div>
     ${hasRemote ? `<label class="minef" style="margin-top:12px"><input type="checkbox" id="delRemote" /> Also delete remote <code>origin/${esc(b)}</code> (affects the shared GitHub repo)</label>` : ''}
-    <div class="warn">⚠ Force-deletes even if the branch isn’t merged.</div>
+    <div class="mwarn">⚠ ${risky && br.ahead ? `This branch has ${plural(br.ahead, 'commit')} that ${br.ahead === 1 ? 'is' : 'are'} not in ${esc(TARGET)}. ` : ''}Force-deletes even if the branch isn’t merged.</div>
     <div class="foot">
       <button class="btn ghost" id="mCancel">Cancel</button>
-      <button class="btn" id="mOk" style="background:var(--red);border-color:var(--red);color:#fff">Delete</button>
+      <button class="btn red" id="mOk">Delete</button>
     </div>`;
   $('#modalBg').classList.add('show');
   $('#mCancel').onclick = closeModal;
@@ -530,46 +758,115 @@ function askDelete(b, hasRemote) {
     closeModal();
     act('delete', { branch: b, remote }, `Delete ${b}${remote ? ' (+ remote)' : ''}`);
   };
+  $('#mCancel').focus();
 }
 
 // ── run an action ──
+let outTimer = null;
 async function act(endpoint, body, label) {
-  showOut(label, '<span class="spin"></span> running…', false);
-  const r = await api.post(endpoint, body);
+  if (BUSY) return;
+  BUSY = true; document.body.classList.add('busy');
+  showOut(label, '<span class="spin"></span> running…');
+  const r = await api.post(endpoint, body).catch(() => ({ ok: false, error: 'server not reachable — is it still running?' }));
+  const clean = (t) => (t || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim(); // drop terminal colour / cursor codes
   const lines = [];
   if (r.cmd) lines.push('$ ' + r.cmd);
-  if (r.stdout && r.stdout.trim()) lines.push(r.stdout.trim());
-  if (r.stderr && r.stderr.trim()) lines.push(r.stderr.trim());
+  if (clean(r.stdout)) lines.push(clean(r.stdout));
+  if (clean(r.stderr)) lines.push(clean(r.stderr));
   if (r.url) lines.push((r.existing ? 'PR already open: ' : 'PR created: ') + r.url);
   if (r.error) lines.push('✖ ' + r.error);
   const head = r.ok
-    ? `<span class="ok">✓ ${esc(label)}</span>` + (r.url ? ` — <a href="${esc(r.url)}" target="_blank">${esc(r.url)}</a>` : '')
-    : `<span class="err">✖ ${esc(label)} failed</span>`;
-  showOut(label, head + '\n\n' + esc(lines.join('\n\n')), true);
-  load(); // refresh list
+    ? `<span class="okc">✓ ${esc(label)}</span>` + (r.url ? ` — <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>` : '')
+    : `<span class="errc">✖ ${esc(label)} failed</span>`;
+  showOut(label, head + '\n\n' + esc(lines.join('\n\n')));
+  BUSY = false; document.body.classList.remove('busy');
+  if (r.ok && !r.url) outTimer = setTimeout(hideOut, 6000); // success closes itself; failures and PR links stay
+  await load({ force: true });
 }
 
-function showOut(title, html, persist) {
+function showOut(title, html) {
+  clearTimeout(outTimer);
   $('#outTitle').textContent = title;
   $('#outPre').innerHTML = html;
   $('#out').classList.add('show');
 }
+function hideOut() { clearTimeout(outTimer); $('#out').classList.remove('show'); }
+$('#outClose').onclick = hideOut;
+$('#out').addEventListener('mouseenter', () => clearTimeout(outTimer)); // reading it → keep it open
 
 // ── controls ──
+function setTarget(t) {
+  TARGET = t; store.set('target', t); LAST_SIG = '';
+  load();
+}
 $('#seg').addEventListener('click', (e) => {
   const btn = e.target.closest('button'); if (!btn) return;
-  TARGET = btn.dataset.t;
-  [...$('#seg').children].forEach((c) => c.classList.toggle('on', c === btn));
-  load();
+  setTarget(btn.dataset.t);
 });
-$('#mineOnly').addEventListener('change', (e) => { MINE_ONLY = e.target.checked; renderList(LAST_DATA); });
-$('#refreshBtn').onclick = load;
-$('#fetchBtn').onclick = async () => {
-  $('#fetchBtn').innerHTML = '<span class="spin"></span>';
-  await act('fetch', {}, 'git fetch --prune');
-  $('#fetchBtn').innerHTML = '⟳ Fetch';
-};
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); closeDropdown(); } });
+$('#views').addEventListener('click', (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  VIEW = btn.dataset.view; store.set('view', VIEW); renderList();
+});
+$('#mineOnly').addEventListener('change', (e) => { MINE_ONLY = e.target.checked; store.set('mine', MINE_ONLY); renderList(); });
+$('#q').addEventListener('input', (e) => { QUERY = e.target.value; renderList(); });
+$('#refreshBtn').onclick = () => load({ force: true });
+$('#fetchBtn').onclick = () => act('fetch', {}, 'git fetch --prune origin');
+
+$('#banners').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-banner]'); if (!btn) return;
+  if (btn.dataset.banner === 'retry') load({ force: true });
+  if (btn.dataset.banner === 'use-origin') setTarget('origin/' + STATE.main);
+  if (btn.dataset.banner === 'update-main') askUpdateMain();
+});
+
+$('#list').addEventListener('click', (e) => {
+  if (e.target.closest('[data-clear]')) {
+    VIEW = 'all'; MINE_ONLY = false; QUERY = ''; $('#q').value = '';
+    store.set('view', VIEW); store.set('mine', false); renderHeader(); renderList();
+    return;
+  }
+  const row = e.target.closest('.row'); if (!row) return;
+  const name = row.dataset.name;
+  const actEl = e.target.closest('[data-act]');
+  if (actEl) {
+    if (actEl.disabled) return;
+    const b = findBranch(name);
+    switch (actEl.dataset.act) {
+      case 'toggle': return toggleRow(name);
+      case 'push': return askPush(name);
+      case 'pr': return askPR(name);
+      case 'rebase': return askRebase(name);
+      case 'reset': return askReset(name);
+      case 'delete': return askDelete(name, !!(b && b.upstream && b.push.kind !== 'gone'));
+      case 'update-main': return askUpdateMain();
+    }
+    return;
+  }
+  if (e.target.closest('a, button, .details')) return;        // links, disabled buttons, the details panel itself
+  if (String(window.getSelection())) return;                   // selecting text is not a click
+  if (e.target.closest('.row-main')) toggleRow(name);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (modalOpen()) return closeModal();
+    if (document.activeElement === $('#q')) { QUERY = ''; $('#q').value = ''; $('#q').blur(); renderList(); }
+    return;
+  }
+  const typing = /^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '');
+  if (typing || modalOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
+  if (e.key === 'r') load({ force: true });
+});
+
+// keep it fresh while the tab is visible, without disturbing a dialog or a running command
+setInterval(() => {
+  renderFresh();
+  if (document.visibilityState === 'visible' && !modalOpen() && !BUSY && Date.now() - LOADED_AT >= AUTO_REFRESH_MS) load();
+}, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !modalOpen() && !BUSY && Date.now() - LOADED_AT > 10000) load();
+});
 
 load();
 </script>
