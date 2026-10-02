@@ -27,4 +27,18 @@ if ! ssh-add -l >/dev/null 2>&1; then
   echo "   (Reset / Rebase / local Delete still work without it.)"
 fi
 
+# Desktop / .desktop launches run a NON-interactive shell, so ~/.bashrc (where nvm lives) is
+# never sourced and `node` is missing from PATH — the app would die with "node: not found".
+# Recover node: use one already on PATH, else fall back to the newest nvm-installed version.
+if ! command -v node >/dev/null 2>&1; then
+  nvm_node_bin="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -n1 || true)"
+  if [ -n "${nvm_node_bin:-}" ]; then PATH="$nvm_node_bin:$PATH"; fi
+fi
+if ! command -v node >/dev/null 2>&1; then
+  echo "❌ Node.js not found — looked on PATH and in ~/.nvm/versions/node/*." >&2
+  echo "   Launch from a terminal where 'node -v' works, or install Node." >&2
+  read -rp "Press Enter to close… " _ 2>/dev/null || sleep 8
+  exit 1
+fi
+
 exec node server.js

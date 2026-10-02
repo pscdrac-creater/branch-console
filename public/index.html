@@ -64,9 +64,10 @@
 
   /* branch list */
   .list { display: flex; flex-direction: column; gap: 8px; }
-  .row { display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: center;
+  .row { display: flex; flex-direction: column;
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 15px; }
   .row.current { border-color: #2c4a30; box-shadow: inset 3px 0 0 var(--green); }
+  .row-main { display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: center; }
   .meta { min-width: 0; }
   .name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .name .b { font: 600 14px/1 var(--mono); color: var(--text); }
@@ -85,6 +86,52 @@
   .ab .down { color: var(--red); }
   .ab .even { color: #6e7681; }
   .actions { display: flex; gap: 7px; align-items: center; }
+
+  /* worktree + port hint — its own line under the summary, never truncated */
+  .wtline { margin-top: 5px; font-size: 12px; color: var(--muted);
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .wt { color: var(--muted); }
+  .port { font-family: var(--mono); font-size: 10.5px; padding: 0 6px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--panel2); color: var(--muted); }
+  .port.fe.live { color: #58a6ff; border-color: #1f3a5f; }
+  .port.be.live { color: var(--green); border-color: #243; }
+
+  /* details dropdown — a floating popover anchored to the button, not an inline panel */
+  .caret { background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 7px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  .caret:hover, .caret.active { border-color: var(--muted); color: var(--text); }
+  .caret .chev { display: inline-block; transition: transform .15s; }
+  .caret.active .chev { transform: rotate(180deg); }
+  .dropdown { position: fixed; z-index: 60; width: min(432px, 94vw); max-height: 72vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 0 18px 16px; box-shadow: 0 14px 40px rgba(1,4,9,.65); display: none; }
+  .dropdown.show { display: block; }
+  .dropdown .det-sec { margin-top: 15px; }
+  .dd-head { position: sticky; top: 0; z-index: 1; background: var(--panel);
+    display: flex; align-items: center; gap: 10px; padding: 13px 0 10px; border-bottom: 1px solid var(--border); }
+  .dd-title { font: 600 13px/1 var(--mono); color: var(--text); word-break: break-all; }
+  .dd-x { margin-left: auto; flex: none; background: transparent; border: 0; color: var(--muted);
+    cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; }
+  .dd-x:hover { color: var(--text); }
+  .det-sec h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: 78px 1fr; gap: 4px 10px; font-size: 12.5px; margin: 0; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; color: var(--text); word-break: break-word; }
+  .kv dd.mono, .kv .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+  .portrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .pport { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px;
+    padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel2); }
+  .pport.fe { color: #58a6ff; border-color: #1f3a5f; }
+  .pport.be { color: var(--green); border-color: #243; }
+  .pport .pn { color: var(--muted); font-size: 10.5px; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px;
+    font-size: 11px; border: 1px solid var(--border); color: var(--muted); }
+  .pill.open { color: var(--green); border-color: #243; }
+  .pill.draft, .pill.pending { color: var(--amber); border-color: #432; }
+  .pill.merged { color: var(--purple); border-color: #3a2d52; }
+  .pill.closed, .pill.fail { color: var(--red); border-color: #79302c; }
+  .pill.pass { color: var(--green); border-color: #243; }
 
   /* output panel */
   .out { position: fixed; left: 0; right: 0; bottom: 0; background: #0a0d12; border-top: 1px solid var(--border);
@@ -145,6 +192,9 @@
   <div class="list" id="list"><div class="empty">Loading branches…</div></div>
 </div>
 
+<!-- per-branch details dropdown (floating popover) -->
+<div class="dropdown" id="dropdown"></div>
+
 <!-- confirm / pr modal -->
 <div class="modal-bg" id="modalBg">
   <div class="modal" id="modal"></div>
@@ -162,10 +212,12 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-const CLIENT_VERSION = 3;
+const CLIENT_VERSION = 4;
 let TARGET = 'main';
 let MINE_ONLY = false;
 let STATE = { current: '', dirty: false, main: 'main' };
+let CURRENT_ROWS = [];   // branches as currently rendered (post Mine-only filter), indexed for the dropdown
+let DD_OPEN = -1;        // index of the branch whose details dropdown is open, or -1
 
 const api = {
   state:    () => fetch('/api/state').then(r => r.json()),
@@ -214,14 +266,16 @@ async function load() {
 let LAST_DATA = { branches: [] };
 function renderList(data) {
   LAST_DATA = data;
+  closeDropdown(); // indices are about to change — never leave a stale dropdown open
   const list = $('#list');
   if (data.prError) console.warn('PR lookup:', data.prError);
   const all = data.branches || [];
   const rows = MINE_ONLY ? all.filter((b) => b.mine) : all;
+  CURRENT_ROWS = rows;
   $('#countLbl').textContent = MINE_ONLY ? `${rows.length} of ${all.length} (mine)` : `${all.length} branches`;
   if (!rows.length) { list.innerHTML = `<div class="empty">${all.length ? 'No branches match “Mine only”.' : 'No branches.'}</div>`; return; }
 
-  list.innerHTML = rows.map((b) => {
+  list.innerHTML = rows.map((b, i) => {
     const isTargetSelf = b.name === TARGET || (TARGET === 'main' && b.name === STATE.main);
     const locked = !!b.lockedAt;
     const blockEdit = locked; // can't reset/rebase a branch checked out elsewhere
@@ -237,10 +291,20 @@ function renderList(data) {
     if (locked) tags.push(`<span class="tag lock" title="${esc(b.lockedAt)}">🔒 worktree</span>`);
 
     const pr = b.pr
-      ? `<a href="${esc(b.pr.url)}" target="_blank" title="${esc(b.pr.title)}">#${b.pr.number}${b.pr.isDraft ? ' <span class="tag draft">draft</span>' : ''}</a>`
+      ? `<a href="${esc(b.pr.url)}" target="_blank" title="${esc(b.pr.title)}">#${b.pr.number}</a>${prStatePill(b.pr)}`
       : '<span style="color:#6e7681">no PR</span>';
 
-    return `<div class="row ${b.isCurrent ? 'current' : ''}">
+    // dedicated "running on which port / in which worktree" line — always visible,
+    // never truncated by the summary line's ellipsis.
+    const wtLine = b.worktree
+      ? `<span class="wt" title="${esc(b.worktree)}">🖥 ${esc(b.worktreeName)}</span>` +
+        ((b.ports && b.ports.length)
+          ? ' ' + b.ports.map((p) => `<span class="port ${p.kind.toLowerCase()} live" title="${esc(p.proc)} · pid ${p.pid}">${p.kind} :${p.port}</span>`).join(' ')
+          : ' <span class="port" title="checked out here, but no dev server is listening">idle · nothing running</span>')
+      : '';
+
+    return `<div class="row ${b.isCurrent ? 'current' : ''}" id="row-${i}">
+      <div class="row-main">
       <div class="meta">
         <div class="name">
           <span class="b ${b.isMain ? 'main' : ''}">${esc(b.name)}</span>
@@ -250,8 +314,10 @@ function renderList(data) {
           <span class="sha">${esc(b.sha)}</span> · ${esc(b.subject)} · ${esc(b.rel)}
           &nbsp; <span class="ab">${ab}</span> &nbsp; · PR: ${pr}
         </div>
+        ${wtLine ? `<div class="wtline">${wtLine}</div>` : ''}
       </div>
       <div class="actions">
+        <button class="caret" onclick="openDropdown(${i}, this)" aria-expanded="false" title="branch, worktree/port & PR details"><span class="chev">▾</span> Details</button>
         <button class="btn" ${blockEdit || isTargetSelf ? 'disabled' : ''} title="${blockEdit ? 'checked out in another worktree' : (isTargetSelf ? 'already the target' : 'git reset')}"
           onclick="askReset('${esc(b.name)}')">↺ Reset</button>
         <button class="btn" ${blockEdit || isTargetSelf ? 'disabled' : ''} title="${blockEdit ? 'checked out in another worktree' : (isTargetSelf ? 'already the target' : 'git rebase')}"
@@ -262,9 +328,120 @@ function renderList(data) {
           title="${b.isMain ? "can't delete main" : b.isCurrent ? 'currently checked out' : locked ? 'checked out in another worktree' : 'delete branch'}"
           onclick="askDelete('${esc(b.name)}', ${b.upstream ? 'true' : 'false'})">🗑</button>
       </div>
+      </div>
     </div>`;
   }).join('');
 }
+
+// small state pill next to the inline PR number
+function prStatePill(p) {
+  if (!p) return '';
+  if (p.isDraft) return ' <span class="pill draft">draft</span>';
+  if (p.state === 'MERGED') return ' <span class="pill merged">merged</span>';
+  if (p.state === 'CLOSED') return ' <span class="pill closed">closed</span>';
+  return ' <span class="pill open">open</span>';
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+  catch { return iso; }
+}
+
+// expandable per-branch details: branch info · worktree & ports · PR status
+function rowDetails(b) {
+  const branch = `<dl class="kv">
+    <dt>SHA</dt><dd class="mono">${esc(b.sha)}</dd>
+    <dt>Subject</dt><dd>${esc(b.subject || '—')}</dd>
+    <dt>Author</dt><dd>${esc(b.author || '?')}${b.authorEmail ? ` <span class="mono muted">&lt;${esc(b.authorEmail)}&gt;</span>` : ''}</dd>
+    <dt>Updated</dt><dd>${esc(b.rel)}</dd>
+    <dt>vs ${esc(TARGET)}</dt><dd class="mono">${b.ahead ? `↑${b.ahead} ` : ''}${b.behind ? `↓${b.behind} ` : ''}${!b.ahead && !b.behind ? 'even' : ''}</dd>
+    <dt>Upstream</dt><dd class="mono">${b.upstream ? esc(b.upstream) + (b.track ? ' ' + esc(b.track) : '') : 'none'}</dd>
+    <dt>Merged</dt><dd>${b.merged ? 'yes' : 'no'}</dd>
+  </dl>`;
+
+  let wt;
+  if (!b.worktree) {
+    wt = '<div class="muted" style="font-size:12.5px">Not checked out in any worktree.</div>';
+  } else {
+    const ports = (b.ports && b.ports.length)
+      ? `<div class="portrow">${b.ports.map((p) =>
+          `<span class="pport ${p.kind.toLowerCase()}" title="pid ${p.pid} · ${esc(p.cwd || '')}">${p.kind} :${p.port} <span class="pn">${esc(p.proc || 'proc')}</span></span>`).join('')}</div>`
+      : `<div class="muted" style="font-size:12.5px;margin-top:8px">No dev server running.${b.expectedPorts ? ` <span class="mono">expected FE :${b.expectedPorts.fe} · BE :${b.expectedPorts.be}</span>` : ''}</div>`;
+    wt = `<dl class="kv"><dt>Path</dt><dd class="mono">${esc(b.worktree)}</dd></dl>${ports}`;
+  }
+
+  let prs;
+  if (b.pr) {
+    const p = b.pr;
+    const checks = p.checks
+      ? `<span class="pill ${p.checks.overall === 'passing' ? 'pass' : p.checks.overall === 'failing' ? 'fail' : 'pending'}" title="${p.checks.pass} passed · ${p.checks.fail} failed · ${p.checks.pending} pending">${p.checks.overall} · ${p.checks.pass}/${p.checks.total}</span>`
+      : '<span class="pill">no checks</span>';
+    const review = p.reviewDecision
+      ? `<span class="pill ${p.reviewDecision === 'APPROVED' ? 'pass' : p.reviewDecision === 'CHANGES_REQUESTED' ? 'fail' : 'pending'}">${esc(p.reviewDecision.toLowerCase().replace(/_/g, ' '))}</span>`
+      : '<span class="muted">—</span>';
+    prs = `<dl class="kv">
+      <dt>PR</dt><dd><a href="${esc(p.url)}" target="_blank">#${p.number}</a> ${prStatePill(p)}</dd>
+      <dt>Title</dt><dd>${esc(p.title || '—')}</dd>
+      <dt>Base</dt><dd class="mono">${esc(p.baseRefName || STATE.main)}</dd>
+      <dt>Mergeable</dt><dd>${esc((p.mergeable || 'unknown').toLowerCase())}</dd>
+      <dt>Checks</dt><dd>${checks}</dd>
+      <dt>Review</dt><dd>${review}</dd>
+      <dt>Updated</dt><dd>${esc(fmtDate(p.updatedAt))}</dd>
+    </dl>`;
+  } else {
+    prs = `<div class="muted" style="font-size:12.5px">No pull request.${b.isMain ? '' : ` <a href="#" onclick="askPR('${esc(b.name)}');return false;">Open one →</a>`}</div>`;
+  }
+
+  return `<div class="det-sec"><h4>Branch</h4>${branch}</div>
+    <div class="det-sec"><h4>Worktree &amp; ports</h4>${wt}</div>
+    <div class="det-sec"><h4>Pull request</h4>${prs}</div>`;
+}
+
+// ── details dropdown (floating popover) ──
+function closeDropdown() {
+  const dd = $('#dropdown');
+  if (dd) dd.classList.remove('show');
+  DD_OPEN = -1;
+  document.querySelectorAll('.caret.active').forEach((c) => {
+    c.classList.remove('active');
+    c.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function openDropdown(i, btn) {
+  const dd = $('#dropdown');
+  if (DD_OPEN === i && dd.classList.contains('show')) { closeDropdown(); return; } // toggle off
+  closeDropdown();
+  const b = CURRENT_ROWS[i];
+  if (!b || !dd) return;
+  dd.innerHTML = `<div class="dd-head"><span class="dd-title">⎇ ${esc(b.name)}</span>` +
+    `<button class="dd-x" onclick="closeDropdown()" title="close">✕</button></div>${rowDetails(b)}`;
+  dd.classList.add('show');
+  DD_OPEN = i;
+  btn.classList.add('active');
+  btn.setAttribute('aria-expanded', 'true');
+  positionDropdown(btn, dd);
+}
+
+function positionDropdown(btn, dd) {
+  const r = btn.getBoundingClientRect();
+  const w = dd.offsetWidth, h = dd.offsetHeight, gap = 6, pad = 8;
+  let left = Math.max(pad, Math.min(r.right - w, window.innerWidth - w - pad)); // right-align to button, keep on-screen
+  let top = r.bottom + gap;
+  if (top + h > window.innerHeight - pad) top = Math.max(pad, r.top - gap - h); // flip above if it won't fit below
+  dd.style.left = left + 'px';
+  dd.style.top = top + 'px';
+}
+
+// close the dropdown on outside click, scroll, resize, or Escape
+document.addEventListener('click', (e) => {
+  if (DD_OPEN < 0) return;
+  if ($('#dropdown').contains(e.target) || e.target.closest('.caret')) return;
+  closeDropdown();
+});
+window.addEventListener('scroll', () => { if (DD_OPEN >= 0) closeDropdown(); }, true);
+window.addEventListener('resize', () => { if (DD_OPEN >= 0) closeDropdown(); });
 
 // ── modal ──
 function closeModal() { $('#modalBg').classList.remove('show'); }
@@ -392,7 +569,7 @@ $('#fetchBtn').onclick = async () => {
   await act('fetch', {}, 'git fetch --prune');
   $('#fetchBtn').innerHTML = '⟳ Fetch';
 };
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); closeDropdown(); } });
 
 load();
 </script>

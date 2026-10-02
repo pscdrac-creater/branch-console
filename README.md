@@ -15,6 +15,20 @@ info: ahead/behind vs the target, last commit, merged-into-main badge, open-PR
 link, a `by <author>` flag on branches that aren't yours, and a 🔒 marker for
 branches checked out in another worktree.
 
+Each checked-out branch also shows **which worktree it lives in and which dev
+ports it's actually running on** — e.g. `🖥 scalper-3003  FE :3003  BE :4003`
+(live ports are detected from the OS, not guessed; a worktree with nothing
+running shows `idle · nothing running`). Ports are matched to worktrees by the
+listening process's working directory (`ss -ltnp` → `/proc/<pid>/cwd`), covering
+the `300X`/`400X` and `7001`/`7002` dev-stack scheme.
+
+A **▾ Details** dropdown on every row expands the full picture:
+- **Branch** — SHA, subject, author + email, ahead/behind, upstream, merged.
+- **Worktree & ports** — worktree path and each live FE/BE port (process + pid).
+- **Pull request** — PR number + state (open / draft / merged / closed), base
+  branch, mergeability, **CI check rollup** (e.g. `passing · 9/9`), and review
+  decision.
+
 Every Reset / Rebase / PR / Delete click shows the **exact command** and a
 confirm step first. Nothing fires on a single click.
 

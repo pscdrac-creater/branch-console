@@ -21,7 +21,7 @@ const PORT = parseInt(process.env.PORT || '5252', 10);
 const HOST = '127.0.0.1';
 const MAIN = process.env.MAIN_BRANCH || 'main'; // PR base + reset/rebase target name
 const VALID_TARGETS = new Set([MAIN, `origin/${MAIN}`]);
-const VERSION = 3; // bump on route/behavior changes; surfaced in /api/state so the page can warn about a stale server
+const VERSION = 4; // v4: per-branch worktree + running dev ports, richer PR status, details dropdown
 
 // "Mine" detection — a branch is mine if its commits ahead of the target were
 // authored by one of these emails. Seeded from MY_EMAILS env + git config user.email.
@@ -93,6 +93,69 @@ async function worktreeMap() {
   return parseWorktrees((await git('worktree', 'list', '--porcelain')).stdout);
 }
 
+// ── running dev-server ports per worktree ─────────────────────────────────────
+// A worktree runs its own frontend + backend on an offset port scheme
+// (FE 300X / BE 400X, plus the 7001/7002 pair). We only surface those dev-stack
+// ports and ignore shared infra (redis 6379, postgres 5432, microservices 800X).
+function classifyPort(port) {
+  if ((port >= 3000 && port <= 3099) || port === 7001) return 'FE';
+  if ((port >= 4000 && port <= 4099) || port === 7002 || port === 8000) return 'BE';
+  return null;
+}
+
+// Best-effort "expected" ports from the worktree folder name (scalper-3003 → FE 3003,
+// BE 4003; scalper-7001 → FE 7001, BE 7002). Shown as a hint when nothing is live.
+function expectedPorts(basename) {
+  const m = (basename || '').match(/-(\d{4})$/);
+  if (!m) return null;
+  const fe = parseInt(m[1], 10);
+  const be = fe >= 3000 && fe <= 3099 ? 4000 + (fe - 3000) : fe + 1;
+  return { fe, be };
+}
+
+const _cwdCache = {};
+function pidCwd(pid) {
+  if (pid in _cwdCache) return _cwdCache[pid];
+  let cwd = null;
+  try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { cwd = null; }
+  return (_cwdCache[pid] = cwd);
+}
+
+// Parse `ss -ltnpH` → dev-stack listening ports with the owning process cwd.
+async function listeningDevPorts() {
+  const r = await run('ss', ['-ltnpH'], { timeout: 8000 });
+  if (r.code !== 0) return []; // ss missing / unreadable → just skip port info
+  const byPort = {};
+  r.stdout.split('\n').forEach((line) => {
+    if (!line.trim()) return;
+    const local = line.trim().split(/\s+/)[3] || '';       // e.g. 0.0.0.0:3003 / *:3003 / [::]:22
+    const pm = local.match(/:(\d+)$/);
+    if (!pm) return;
+    const port = parseInt(pm[1], 10);
+    const kind = classifyPort(port);
+    if (!kind) return;
+    const um = line.match(/users:\(\((.*)\)\)\s*$/);
+    let proc = '', pid = null;
+    if (um) {
+      const nm = um[1].match(/^"([^"]+)"/);
+      proc = nm ? nm[1].replace(/\s*\(v.*$/, '').trim() : ''; // ss truncates comm; drop " (v.." tail
+      const pidm = um[1].match(/pid=(\d+)/);
+      pid = pidm ? parseInt(pidm[1], 10) : null;
+    }
+    if (!(port in byPort)) byPort[port] = { port, kind, proc, pid, cwd: pid ? pidCwd(pid) : null };
+  });
+  return Object.values(byPort);
+}
+
+// Which of those ports belong to a given worktree path (process cwd == path or under it).
+function portsForPath(devPorts, wtPath) {
+  if (!wtPath) return [];
+  const pref = wtPath.replace(/\/+$/, '') + '/';
+  return devPorts
+    .filter((p) => p.cwd && (p.cwd === wtPath || p.cwd.startsWith(pref)))
+    .sort((a, b) => (a.kind === b.kind ? a.port - b.port : a.kind === 'FE' ? -1 : 1));
+}
+
 async function getState() {
   const [cur, dirtyR, originR] = await Promise.all([
     git('rev-parse', '--abbrev-ref', 'HEAD'),
@@ -109,16 +172,44 @@ async function getState() {
   };
 }
 
+// Roll a PR's individual CI checks up into { pass, fail, pending, total, overall }.
+function summarizeChecks(rollup) {
+  if (!Array.isArray(rollup) || !rollup.length) return null;
+  let pass = 0, fail = 0, pending = 0;
+  for (const c of rollup) {
+    const status = (c.status || '').toUpperCase();          // CheckRun status
+    const concl = (c.conclusion || c.state || '').toUpperCase(); // CheckRun conclusion / StatusContext state
+    if (status && status !== 'COMPLETED') { pending++; continue; }
+    if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(concl)) pass++;
+    else if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(concl)) fail++;
+    else if (['PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED'].includes(concl)) pending++;
+    else pass++; // completed but unrecognised → treat as non-blocking
+  }
+  const total = pass + fail + pending;
+  const overall = fail ? 'failing' : pending ? 'pending' : 'passing';
+  return { pass, fail, pending, total, overall };
+}
+
 async function listPRs() {
+  // --state all so a branch's merged/closed PR still surfaces (not just open ones).
   const r = await gh(
-    'pr', 'list', '--state', 'open',
-    '--json', 'number,url,headRefName,isDraft,title', '--limit', '200'
+    'pr', 'list', '--state', 'all',
+    '--json', 'number,url,headRefName,isDraft,title,state,reviewDecision,statusCheckRollup,baseRefName,updatedAt,mergeable',
+    '--limit', '200'
   );
   if (r.code !== 0) return { map: {}, error: (r.stderr || 'gh pr list failed').split('\n')[0] };
   try {
     const map = {};
+    const rank = (p) => (p.state === 'OPEN' ? 2 : 1); // prefer the open PR; else newest number
     JSON.parse(r.stdout || '[]').forEach((p) => {
-      map[p.headRefName] = { number: p.number, url: p.url, isDraft: p.isDraft, title: p.title };
+      const cur = map[p.headRefName];
+      if (cur && !(rank(p) > rank(cur) || (rank(p) === rank(cur) && p.number > cur.number))) return;
+      map[p.headRefName] = {
+        number: p.number, url: p.url, isDraft: p.isDraft, title: p.title,
+        state: p.state, reviewDecision: p.reviewDecision || null, baseRefName: p.baseRefName || null,
+        updatedAt: p.updatedAt || null, mergeable: p.mergeable || null,
+        checks: summarizeChecks(p.statusCheckRollup),
+      };
     });
     return { map, error: null };
   } catch {
@@ -135,12 +226,13 @@ async function listBranches(target) {
     '%(upstream:short)', '%(upstream:track)', '%(authorname)', '%(authoremail)', '%(contents:subject)',
   ].join(SEP);
 
-  const [refsR, curR, mergedR, wt, prR] = await Promise.all([
+  const [refsR, curR, mergedR, wt, prR, devPorts] = await Promise.all([
     git('for-each-ref', '--sort=-committerdate', `--format=${fmt}`, 'refs/heads'),
     git('rev-parse', '--abbrev-ref', 'HEAD'),
     git('branch', '--merged', target, '--format=%(refname:short)'),
     worktreeMap(),
     listPRs(),
+    listeningDevPorts(),
   ]);
 
   const current = curR.stdout.trim();
@@ -171,6 +263,10 @@ async function listBranches(target) {
     r.merged = merged.has(r.name);
     const lock = wt[r.name];
     r.lockedAt = lock && lock !== REPO ? lock : null; // checked out in ANOTHER worktree
+    r.worktree = lock || null;                        // full path of the worktree it's checked out in (incl. main)
+    r.worktreeName = lock ? path.basename(lock) : null;
+    r.ports = portsForPath(devPorts, lock);           // dev servers actually LISTENING for this worktree
+    r.expectedPorts = lock ? expectedPorts(r.worktreeName) : null;
     r.pr = prR.map[r.name] || null;
     // mine: current branch, OR any commit unique to this branch is mine,
     // OR (no unique commits) the tip author is mine.
