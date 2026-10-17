@@ -9,6 +9,9 @@ export REPO="${REPO:-/home/piyush/claude/scalper}"
 export PORT="${PORT:-5252}"
 # Your git identities, so "Mine only" works across machines (config email is added automatically).
 export MY_EMAILS="${MY_EMAILS:-piyushc3@gmail.com,drac@PIyushs-MacBook-Pro.local}"
+# Your worktrees (folder names). A branch open in, or ever worked on in, one of them is yours,
+# whoever wrote its commits. scalper-3005 is not yours.
+export MY_WORKTREES="${MY_WORKTREES:-scalper,scalper-3003,scalper-3007}"
 
 # Always restart so the latest server.js code is running — this prevents stale-route
 # bugs (e.g. an old server process that 404s on /api/delete while the page shows the button).

@@ -22,6 +22,28 @@ Every branch gets **one row with labelled columns**, so nothing is cut off:
 Branches are grouped: **Checked out** (open in a worktree right now) →
 **Other work** → **Safe to clean up** → **Base branch**.
 
+**Worktrees** are listed in their own section above the branches: folder, the branch it
+has open, uncommitted files, live dev ports.
+
+- **New worktree** (top bar) — open a new or existing branch in its own folder. A new branch
+  starts from `origin/main` (or local `main`) and does not track it. When the repo has
+  `scripts/wt` (scalper does), this runs `wt create N`, so the worktree gets ports, env files,
+  `node_modules` and a database; the number defaults to the first free one. Any other repo gets
+  a plain `git worktree add` into `<repo>-<name>`.
+- **New branch** (top bar, or on a worktree row) — pick a worktree, name the branch, and that
+  worktree is switched onto it. Refused while the worktree has uncommitted files, and for the
+  main checkout while it is on `main`.
+- **Remove** (on a worktree row) — runs `wt remove N`, or `wt delete N` when "also delete its
+  database" is ticked; plain `git worktree remove` for worktrees `wt` did not make. The branch is
+  kept. Uncommitted files block the removal until you tick that you are throwing them away. The
+  checkout the console runs on cannot be removed.
+
+**Whose branch is it?** A branch is yours when it is open in one of your worktrees (`MY_WORKTREES`),
+was ever open in one (read from that worktree's reflog), or has commits by you (`MY_EMAILS`), no matter
+who wrote the last commit on it. A branch reset to main keeps main's last commit, so that author is
+never used. Branches that are not yours get a `by <name>` tag only when their own commits are by someone
+else; a branch with no commits of its own gets no name. The expanded row says why it is yours.
+
 Also on the page:
 
 - **Filters** — `All` / `Needs attention` / `Open PR` / `Clean-up`, a **Mine only**
@@ -76,6 +98,7 @@ REPO=/home/piyush/claude/scalper-3001 PORT=5300 node server.js
 | `PORT`        | `5252`                         | Port (bound to `127.0.0.1` only)     |
 | `MAIN_BRANCH` | `main`                         | Base branch / reset-rebase anchor    |
 | `MY_EMAILS`   | _(git config user.email)_      | Comma-list of your emails for the **Mine only** filter (e.g. across machines) |
+| `MY_WORKTREES`| _(the checkout it runs on)_    | Comma-list of your worktree folders (`start.sh` sets `scalper,scalper-3003,scalper-3007`) |
 | `NO_OPEN`     | _(unset)_                      | Set to `1` to NOT auto-open the browser on start |
 
 ## How the actions map to git

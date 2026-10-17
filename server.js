@@ -1,7 +1,8 @@
 'use strict';
 
 // Branch Console — a tiny, zero-dependency, local-only git ops dashboard.
-// Lists branches in a repo and exposes one-click Push / PR / Rebase / Reset / Delete.
+// Lists branches in a repo and exposes one-click Push / PR / Rebase / Reset / Delete,
+// plus New worktree / Remove worktree / New branch in a worktree.
 // No code review, no Claude in the loop — these are deterministic git/gh commands.
 //
 //   REPO=/path/to/repo PORT=5252 node server.js
@@ -15,15 +16,18 @@ const fs = require('fs');
 const path = require('path');
 
 const { pushState, branchStatus, buildPrQuery, mapPrResponse, parseGithubRemote, parseShortstat } = require('./lib/status');
+const { branchesVisited, branchOwner } = require('./lib/owner');
+const { parseWorktreeList, wtPaths, wtIdFor, nextWorktreeNumber, branchNameProblem, gitWorktreePath, WT_MIN, WT_MAX } = require('./lib/worktrees');
 
 const execFileP = promisify(execFile);
 
 const REPO = process.env.REPO || '/home/piyush/claude/scalper';
+const REPO_REAL = (() => { try { return fs.realpathSync(REPO); } catch { return REPO; } })(); // git prints real paths
 const PORT = parseInt(process.env.PORT || '5252', 10);
 const HOST = '127.0.0.1';
 const MAIN = process.env.MAIN_BRANCH || 'main'; // PR base + reset/rebase target name
 const VALID_TARGETS = new Set([MAIN, `origin/${MAIN}`]);
-const VERSION = 5; // v5: per-branch status verdict, push state, lighter PR lookup, push / update-main actions
+const VERSION = 7; // v7: branch ownership from your worktrees; v6: worktree list, create / remove worktree, new branch in a worktree
 
 // "Mine" detection — a branch is mine if its commits ahead of the target were
 // authored by one of these emails. Seeded from MY_EMAILS env + git config user.email.
@@ -35,6 +39,11 @@ async function ensureMyEmails() {
   if (cfg && !MY_EMAILS.includes(cfg)) MY_EMAILS.push(cfg);
   myEmailsReady = true;
 }
+// "Mine" also comes from worktrees: a branch open in, or ever worked on in, one of these worktrees
+// (folder names, comma-separated) is mine whoever wrote its commits. Default: just the checkout
+// this console runs on.
+const MY_WORKTREES = new Set((process.env.MY_WORKTREES || '').split(',').map((s) => s.trim()).filter(Boolean));
+if (!MY_WORKTREES.size) MY_WORKTREES.add(path.basename(REPO_REAL));
 const normEmail = (e) => (e || '').replace(/[<>]/g, '').trim().toLowerCase();
 const isMineEmail = (e) => MY_EMAILS.includes(normEmail(e));
 
@@ -48,27 +57,33 @@ const GIT_ENV = {
 
 // ── command runner ─────────────────────────────────────────────────────────
 // Never throws, never hangs. Uses execFile (no shell) so branch names can't inject.
-async function run(file, args, { timeout = 40000 } = {}) {
-  const cmd = [file, ...args.filter((a) => a !== '-C' && a !== REPO)].join(' ');
+// stdin is closed straight away (or fed `input`), so nothing can sit waiting for an answer.
+const STALL_HINT = ' — likely an SSH/network/auth stall. Is your ssh-agent loaded? Check with:  ssh-add -l';
+async function run(file, args, { timeout = 40000, input = '', name = file, hint = STALL_HINT } = {}) {
+  const cmd = [name, ...args.filter((a) => a !== '-C' && a !== REPO)].join(' ');
   try {
-    const { stdout, stderr } = await execFileP(file, args, {
+    const p = execFileP(file, args, {
       cwd: REPO,
       maxBuffer: 16 * 1024 * 1024,
       timeout,
       killSignal: 'SIGKILL',
       env: GIT_ENV,
     });
+    p.child.stdin.on('error', () => {}); // the command may exit before reading its input
+    p.child.stdin.end(input);
+    const { stdout, stderr } = await p;
     return { code: 0, stdout: stdout || '', stderr: stderr || '', cmd };
   } catch (e) {
     const timedOut = e.killed || e.signal === 'SIGKILL';
     const stderr = timedOut
-      ? `timed out after ${Math.round(timeout / 1000)}s — likely an SSH/network/auth stall. Is your ssh-agent loaded? Check with:  ssh-add -l`
+      ? `timed out after ${Math.round(timeout / 1000)}s${hint}`
       : (e.stderr || e.message || '');
     return { code: e.code ?? 1, stdout: e.stdout || '', stderr, cmd };
   }
 }
 
 const git = (...args) => run('git', ['-C', REPO, ...args]);
+const gitIn = (dir, ...args) => run('git', ['-C', dir, ...args]);
 const gh = (...args) => run('gh', args);
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -77,22 +92,12 @@ async function localBranches() {
   return r.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
-function parseWorktrees(out) {
-  // git worktree list --porcelain → { branchName: worktreePath }
-  const map = {};
-  let cur = null;
-  out.split('\n').forEach((line) => {
-    if (line.startsWith('worktree ')) cur = line.slice(9).trim();
-    else if (line.startsWith('branch ')) {
-      const ref = line.slice(7).trim().replace('refs/heads/', '');
-      if (cur) map[ref] = cur;
-    } else if (line === '') cur = null;
-  });
-  return map;
-}
-
+// { branchName: worktreePath } for every branch checked out in some worktree
 async function worktreeMap() {
-  return parseWorktrees((await git('worktree', 'list', '--porcelain')).stdout);
+  const map = {};
+  for (const w of parseWorktreeList((await git('worktree', 'list', '--porcelain')).stdout))
+    if (w.branch) map[w.branch] = w.path;
+  return map;
 }
 
 // ── running dev-server ports per worktree ─────────────────────────────────────
@@ -199,6 +204,153 @@ async function getState() {
   };
 }
 
+// ── worktrees ─────────────────────────────────────────────────────────────────
+// With scalper's `scripts/wt` present, create / remove go through it (ports, env files, node_modules,
+// database). Without it — any other repo — they are plain `git worktree` commands.
+const WT_SCRIPT = path.join(REPO_REAL, 'scripts', 'wt');
+function hasWtScript() {
+  try { fs.accessSync(WT_SCRIPT, fs.constants.X_OK); return true; } catch { return false; }
+}
+const WT_SLOW = ' — the script may still be running in the background; check the worktree before trying again';
+const wtRun = (args, { timeout, input } = {}) => run(WT_SCRIPT, args, { timeout, input, name: 'scripts/wt', hint: WT_SLOW });
+
+// Every worktree of the repo with what the page needs: branch, uncommitted files, live dev ports.
+async function worktreeRows(devPorts = []) {
+  const listed = parseWorktreeList((await git('worktree', 'list', '--porcelain')).stdout).filter((w) => !w.bare);
+  return Promise.all(listed.map(async (w) => {
+    const name = path.basename(w.path);
+    const folderMissing = w.prunable || !fs.existsSync(w.path);
+    const dirtyCount = folderMissing ? 0
+      : (await gitIn(w.path, 'status', '--porcelain')).stdout.split('\n').filter((l) => l.trim()).length;
+    return {
+      path: w.path, name, branch: w.branch, detached: w.detached, head: w.head.slice(0, 7),
+      isRepo: w.path === REPO_REAL,           // the checkout this console was started on
+      mine: MY_WORKTREES.has(name),
+      locked: w.locked, prunable: folderMissing,
+      dirtyCount,
+      ports: portsForPath(devPorts, w.path),
+      expectedPorts: expectedPorts(name),
+      wtId: hasWtScript() ? wtIdFor(REPO_REAL, w.path) : null, // the number wt knows it by
+    };
+  }));
+}
+
+// Which of my worktrees has each branch been open in? Read from each worktree's HEAD reflog.
+async function visitedInMyWorktrees(rows) {
+  const out = Object.create(null); // branch names are keys: 'constructor' must not hit Object.prototype
+  const mine = rows.filter((w) => w.mine && !w.prunable);
+  const reflogs = await Promise.all(mine.map((w) => gitIn(w.path, 'reflog', 'show', 'HEAD', '--format=%gs')));
+  mine.forEach((w, i) => {      // in worktree order, so the folder a branch is credited to is the same every time
+    for (const name of branchesVisited(reflogs[i].stdout.split('\n'))) (out[name] = out[name] || []).push(w.name);
+  });
+  return out;
+}
+
+function worktreeSetup(rows) {
+  const kind = hasWtScript() ? 'wt' : 'git';
+  return {
+    kind, min: WT_MIN, max: WT_MAX,
+    parent: path.dirname(REPO_REAL), repoName: path.basename(REPO_REAL),
+    nextNumber: kind === 'wt' ? nextWorktreeNumber(REPO_REAL, rows.map((w) => w.path), fs.existsSync) : null,
+  };
+}
+
+const fail = (error, extra = {}) => ({ ok: false, error, ...extra });
+
+// Name rules shared by "new worktree" and "new branch": git has the last word.
+async function branchNameError(name) {
+  const first = branchNameProblem(name);
+  if (first) return first;
+  const r = await git('check-ref-format', `refs/heads/${name}`);
+  return r.code === 0 ? null : `“${name}” is not a valid branch name`;
+}
+
+// Create a worktree, on a new branch (made from `base`, not tracking it) or on an existing branch.
+async function doWorktreeAdd({ branch, newBranch, base, number, folder }) {
+  const nameErr = await branchNameError(branch);
+  if (nameErr) return fail(nameErr);
+
+  const viaWt = hasWtScript();
+  const target = viaWt ? wtPaths(REPO_REAL, number) : { path: gitWorktreePath(REPO_REAL, folder) };
+  if (viaWt && !target) return fail(`the worktree number must be a whole number from ${WT_MIN} to ${WT_MAX}`);
+  if (!target.path) return fail('the folder name can only use letters, numbers, dots, dashes and underscores');
+  const rows = await worktreeRows();
+  if (fs.existsSync(target.path) || rows.some((w) => w.path === target.path))
+    return fail(`${target.path} already exists`);
+
+  const exists = (await localBranches()).includes(branch);
+  if (newBranch) {
+    if (!VALID_TARGETS.has(base)) return fail(`bad base: ${base}`);
+    if (exists) return fail(`a branch named “${branch}” already exists`);
+  } else {
+    if (!exists) return fail(`there is no branch named “${branch}”`);
+    const held = (await worktreeMap())[branch];
+    if (held) return fail(`“${branch}” is already checked out in ${held}`);
+  }
+
+  let r;
+  if (!viaWt) {
+    r = await git('worktree', 'add', ...(newBranch ? ['--no-track', '-b', branch, target.path, base] : [target.path, branch]));
+  } else {
+    // wt makes new branches from the main checkout's HEAD, so the branch is made first, from `base`.
+    let made = null;
+    if (newBranch) {
+      made = await git('branch', '--no-track', branch, base);
+      if (made.code !== 0) return resultOf(made);
+    }
+    const w = await wtRun(['create', String(target.n), branch], { timeout: 15 * 60 * 1000 });
+    r = made ? { ...w, cmd: `${made.cmd} && ${w.cmd}` } : w;
+    if (r.code !== 0 && made && !(await worktreeMap())[branch]) await git('branch', '-D', branch); // nothing took the branch: undo it
+  }
+  if (r.code !== 0) return resultOf(r);
+  if (!(await worktreeRows()).some((w) => w.path === target.path))
+    return { ...resultOf(r), ok: false, error: `the command finished but ${target.path} is not a worktree` };
+  prCache.at = null;
+  return resultOf(r);
+}
+
+// Remove a worktree. The branch stays. Uncommitted files are only discarded when `force` says so.
+async function doWorktreeRemove({ path: wtPath, dropDb, force }) {
+  const w = (await worktreeRows()).find((x) => x.path === wtPath);
+  if (!w) return fail('that folder is not a worktree of this repo');
+  if (w.isRepo) return fail('this is the main checkout the console runs in, it cannot be removed');
+  if (w.locked) return fail(`${w.name} is locked, unlock it first with: git worktree unlock ${w.path}`);
+  if (w.dirtyCount && !force)
+    return fail(`${w.name} has ${w.dirtyCount} uncommitted ${w.dirtyCount === 1 ? 'file' : 'files'}. Commit them, or confirm that they can be thrown away`);
+
+  let r;
+  if (w.prunable) {
+    r = await git('worktree', 'prune');
+  } else if (w.wtId !== null) {
+    r = dropDb
+      ? await wtRun(['delete', String(w.wtId)], { timeout: 5 * 60 * 1000, input: 'y\n' }) // the page already asked; wt asks again
+      : await wtRun(['remove', String(w.wtId)], { timeout: 5 * 60 * 1000 });
+    await git('worktree', 'prune');
+  } else {
+    r = await git('worktree', 'remove', ...(force ? ['--force'] : []), w.path);
+  }
+  if (r.code !== 0) return resultOf(r);
+  if ((await worktreeRows()).some((x) => x.path === w.path) || fs.existsSync(w.path))
+    return { ...resultOf(r), ok: false, error: `${w.name} is still there after the command finished` };
+  return resultOf(r);
+}
+
+// Start a new branch inside an existing worktree (that worktree is switched onto it).
+async function doBranchNew({ worktree, name, base }) {
+  const nameErr = await branchNameError(name);
+  if (nameErr) return fail(nameErr);
+  if (!VALID_TARGETS.has(base)) return fail(`bad base: ${base}`);
+  const w = (await worktreeRows()).find((x) => x.path === worktree);
+  if (!w) return fail('that folder is not a worktree of this repo');
+  if (w.isRepo && w.branch === MAIN) return fail(`this checkout stays on ${MAIN}, choose another worktree`);
+  if (w.prunable) return fail(`the folder of ${w.name} is missing`);
+  if (w.dirtyCount) return fail(`${w.name} has ${w.dirtyCount} uncommitted ${w.dirtyCount === 1 ? 'file' : 'files'}. Commit or stash them first`);
+  if ((await localBranches()).includes(name)) return fail(`a branch named “${name}” already exists`);
+  const r = await gitIn(w.path, 'switch', '-c', name, '--no-track', base);
+  prCache.at = null;
+  return resultOf(r);
+}
+
 // ── pull requests ─────────────────────────────────────────────────────────────
 // One small GraphQL query for exactly the local branches (see lib/status.js). The last good
 // answer is kept, so a GitHub hiccup shows slightly old PR data instead of "no PR" everywhere.
@@ -249,6 +401,8 @@ async function listBranches(target, force) {
     listeningDevPorts(),
   ]);
 
+  const worktrees = await worktreeRows(devPorts);
+  const visitedIn = await visitedInMyWorktrees(worktrees);   // branch name → [my worktree folders it was open in]
   const current = curR.stdout.trim();
   const merged = new Set(mergedR.stdout.split('\n').map((s) => s.trim()).filter(Boolean));
 
@@ -263,15 +417,17 @@ async function listBranches(target, force) {
 
   await Promise.all(rows.map(async (r) => {
     if (r.name === target) {
-      r.ahead = 0; r.behind = 0; r.aheadAuthors = [];
+      r.ahead = 0; r.behind = 0; r.aheadAuthors = []; r.aheadNames = [];
     } else {
       const ab = await git('rev-list', '--left-right', '--count', `${target}...${r.name}`);
       const [behind, ahead] = ab.stdout.trim().split(/\s+/).map((n) => parseInt(n, 10) || 0);
       r.ahead = ahead || 0; r.behind = behind || 0;
       if (r.ahead > 0) {
-        const au = await git('log', `${target}..${r.name}`, '--format=%ae');
-        r.aheadAuthors = [...new Set(au.stdout.split('\n').map(normEmail).filter(Boolean))];
-      } else r.aheadAuthors = [];
+        const au = await git('log', `${target}..${r.name}`, '--format=%ae%x1f%an');
+        const people = au.stdout.split('\n').filter(Boolean).map((l) => l.split('\x1f'));
+        r.aheadAuthors = [...new Set(people.map(([e]) => normEmail(e)).filter(Boolean))];
+        r.aheadNames = people.map(([, n]) => n);
+      } else { r.aheadAuthors = []; r.aheadNames = []; }
     }
     r.isCurrent = r.name === current;
     r.isMain = r.name === MAIN;
@@ -285,16 +441,20 @@ async function listBranches(target, force) {
     const pr = prR.map[r.name];
     r.pr = pr ? { ...pr, atTip: pr.headRefOid === r.fullSha } : null; // atTip: nothing new since that PR
     r.push = pushState(r.upstream, r.track);          // vs its OWN remote branch
-    // mine: current branch, OR any commit unique to this branch is mine,
-    // OR (no unique commits) the tip author is mine.
-    r.mine = r.isCurrent
-      ? true
-      : (r.aheadAuthors.length ? r.aheadAuthors.some(isMineEmail) : isMineEmail(r.authorEmail));
+    // mine: see lib/owner.js. The last commit's author is never used (a reset branch ends on main's).
+    const openWt = worktrees.find((w) => w.path === lock);
+    r.owner = branchOwner({
+      name: r.name, isCurrent: r.isCurrent,
+      openIn: openWt ? { folder: openWt.name, mine: openWt.mine } : null,
+      visitedIn: visitedIn[r.name] || [],
+      ahead: r.ahead, aheadEmails: r.aheadAuthors, aheadNames: r.aheadNames, isMineEmail,
+    });
+    r.mine = r.owner.mine;
   }));
 
   rows.forEach((r) => { r.status = branchStatus(r, target); }); // the one-line verdict + suggested action
   rows.sort((a, b) => (b.isCurrent ? 1 : 0) - (a.isCurrent ? 1 : 0));
-  return { target, current, prError: prR.error, prAt: prR.at, branches: rows };
+  return { target, current, prError: prR.error, prAt: prR.at, branches: rows, worktrees, wtSetup: worktreeSetup(worktrees) };
 }
 
 // Lazy per-branch detail for the expanded row: the commits this branch adds on top of the target.
@@ -478,6 +638,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/delete') return send(res, 200, await doDelete(await readBody(req)));
     if (req.method === 'POST' && pathname === '/api/push') return send(res, 200, await doPush(await readBody(req)));
     if (req.method === 'POST' && pathname === '/api/update-main') return send(res, 200, await doUpdateMain());
+    if (req.method === 'POST' && pathname === '/api/worktree-add') return send(res, 200, await doWorktreeAdd(await readBody(req)));
+    if (req.method === 'POST' && pathname === '/api/worktree-remove') return send(res, 200, await doWorktreeRemove(await readBody(req)));
+    if (req.method === 'POST' && pathname === '/api/branch-new') return send(res, 200, await doBranchNew(await readBody(req)));
 
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end('{"error":"not found"}');

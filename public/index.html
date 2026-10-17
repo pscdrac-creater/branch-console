@@ -118,6 +118,7 @@
   .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
   .tag.cur { color: var(--green); border-color: #1f3d28; background: rgba(63,185,80,.08); }
   .tag.notmine { color: var(--amber); border-color: #4d3f18; }
+  .tag.yours { color: #7db7ff; border-color: #1f3a5f; background: rgba(76,154,255,.08); }
   .l2 { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; padding-left: 22px; max-width: 100%; }
   .verdict { font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--tone-c, var(--text2)); }
   .verdict i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
@@ -154,7 +155,7 @@
   .act.sug:hover:not(:disabled) { background: var(--accent-d); border-color: var(--accent-d); color: #fff; }
   .act.sug.danger { background: transparent; border-color: var(--red); color: #ff7b72; }
   .act.sug.danger:hover:not(:disabled) { background: rgba(248,81,73,.12); color: #ff7b72; border-color: var(--red); }
-  body.busy .act, body.busy .banner .btn { pointer-events: none; opacity: .5; }
+  body.busy .act, body.busy .banner .btn, body.busy .wbtn, body.busy .gbtn { pointer-events: none; opacity: .5; }
 
   /* expanded details */
   .details { border-top: 1px solid var(--border); padding: 14px 20px 16px 42px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 18px 28px; }
@@ -175,6 +176,25 @@
   .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border2);
     border-top-color: var(--accent); border-radius: 50%; animation: s .7s linear infinite; vertical-align: -2px; }
   @keyframes s { to { transform: rotate(360deg); } }
+
+  /* ── worktrees section ── */
+  .wts h2 .exp { font-size: 11px; }
+  .wts.open h2 .exp { transform: rotate(90deg); color: var(--text); }
+  /* same column template as the branch rows, so Running and Actions line up with the headings above */
+  .wt { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    display: grid; grid-template-columns: var(--cols); gap: 6px 16px; align-items: center; padding: 10px 16px 10px 20px; font-size: 13px; }
+  .wt-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .wt-state { grid-column: 2 / 5; }
+  .wt-name { font: 600 14px/1.3 var(--mono); word-break: break-all; }
+  .wt-where { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; word-break: break-all; color: var(--text2); }
+  .wt-where .mono { font-size: 12.5px; }
+  .wt .warn { color: var(--amber); } .wt .muted { color: var(--muted); }
+  .wt-act { display: flex; gap: 6px; justify-content: flex-end; }
+  .wbtn { background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 7px;
+    padding: 5px 12px; font-size: 12.5px; line-height: 1.3; cursor: pointer; white-space: nowrap; }
+  .wbtn:hover:not(:disabled) { border-color: var(--muted); color: var(--text); }
+  .wbtn:disabled { opacity: .32; cursor: not-allowed; }
+  .wbtn.danger:hover:not(:disabled) { border-color: var(--red); color: #ff7b72; }
 
   /* ── output panel ── */
   .out { position: fixed; left: 0; right: 0; bottom: 0; background: #06090d; border-top: 1px solid var(--border2);
@@ -200,10 +220,24 @@
   .modal .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
   .modal input[type=text], .modal textarea { width: 100%; background: #06090d; color: var(--text); border: 1px solid var(--border);
     border-radius: 8px; padding: 8px 11px; font: 13px var(--mono); resize: vertical; }
+  .modal input[type=number], .modal select { width: 100%; background: #06090d; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 11px; font: 13px var(--mono); }
+  .modal .two { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; }
+  .modal .choice { display: flex; gap: 18px; font-size: 13px; color: var(--text2); }
+  .modal .choice label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text2); cursor: pointer; }
+  .modal .prefixed { display: flex; align-items: center; background: #06090d; border: 1px solid var(--border); border-radius: 8px; }
+  .modal .prefixed span { padding-left: 11px; color: var(--muted); font: 13px var(--mono); white-space: nowrap; }
+  .modal .prefixed input[type=text] { border: 0; background: transparent; padding-left: 2px; }
+  .modal .hint { margin-top: 6px; font-size: 12px; color: var(--muted); min-height: 1.4em; }
+  .modal .hint.bad { color: var(--amber); }
   .modal .foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
 
   /* ── narrow windows: stack each row (branch / labelled facts / actions) ── */
   @media (max-width: 1239px) {
+    .wt { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .wt-id, .wt-act { grid-column: 1 / -1; }
+    .wt-state { grid-column: auto; }
+    .wt-act { justify-content: flex-start; }
     .colhead { display: none; }
     .top { border-bottom: 1px solid var(--border); padding-bottom: 12px; }
     .row-main { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
@@ -231,12 +265,14 @@
       <span class="chip" id="dirtyChip" style="display:none"></span>
       <span class="spacer"></span>
       <span class="fresh" id="fresh"></span>
+      <button class="btn accent gbtn" id="newWtBtn" title="Open a branch in its own folder, so you can work on two things at once">New worktree</button>
+      <button class="btn gbtn" id="newBranchBtn" title="Start a new branch inside one of your worktrees">New branch</button>
       <button class="btn ghost" id="fetchBtn" title="git fetch --prune origin — get the latest from GitHub">Fetch</button>
       <button class="btn ghost" id="refreshBtn" title="Re-read branches and pull requests (r)">Refresh</button>
     </div>
     <div class="bar2">
       <div class="views" id="views"></div>
-      <label class="minef" title="Only branches whose commits are yours"><input type="checkbox" id="mineOnly" /> Mine only</label>
+      <label class="minef" title="Only your branches: open in, or worked on in, one of your worktrees, or with your commits"><input type="checkbox" id="mineOnly" /> Mine only</label>
       <input class="search" id="q" type="search" placeholder="Search branches…   ( / )" autocomplete="off" spellcheck="false" />
       <span class="spacer"></span>
       <span class="lbl" title="Ahead / behind, Reset and Rebase all use this branch">Compare with</span>
@@ -245,6 +281,8 @@
     <div id="banners"></div>
     <div class="colhead" id="colhead"></div>
   </div>
+
+  <section class="group wts open" id="wts"></section>
 
   <div id="list"><div class="empty"><span class="spin"></span> &nbsp;Loading branches…</div></div>
 </div>
@@ -266,7 +304,7 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
-const CLIENT_VERSION = 5;
+const CLIENT_VERSION = 7;
 const AUTO_REFRESH_MS = 30000;
 
 // remembered per browser, so the page comes back the way you left it
@@ -353,7 +391,7 @@ async function load({ force = false } = {}) {
     DATA = data;
     renderHeader();
     renderBanners();
-    if (sig !== LAST_SIG) { LAST_SIG = sig; renderList(); }
+    if (sig !== LAST_SIG) { LAST_SIG = sig; renderList(); renderWorktrees(); }
   } catch (e) {
     LOAD_ERR = 'Can’t reach the Branch Console server. Is it still running? Start it again with ./start.sh';
     renderBanners();
@@ -547,7 +585,8 @@ function detailsHtml(b) {
     : 'nothing running' + (b.expectedPorts ? ` <span class="faint">(usually FE :${b.expectedPorts.fe} · BE :${b.expectedPorts.be})</span>` : '');
   const branch = `<dl class="kv">
     <dt>Last commit</dt><dd><span class="mono faint">${esc(b.sha)}</span> ${esc(b.subject || '—')}</dd>
-    <dt>Author</dt><dd>${esc(b.author || '?')}${b.authorEmail ? ` <span class="mono faint">&lt;${esc(b.authorEmail)}&gt;</span>` : ''}</dd>
+    <dt>Belongs to</dt><dd>${b.mine ? '<span class="ok">You</span>' : b.owner.by.length ? esc(b.owner.by.join(', ')) : '<span class="muted">Not known</span>'} <span class="faint">· ${esc(b.owner.why)}</span></dd>
+    <dt>Last commit by</dt><dd>${esc(b.author || '?')}${b.authorEmail ? ` <span class="mono faint">&lt;${esc(b.authorEmail)}&gt;</span>` : ''}</dd>
     <dt>Updated</dt><dd>${esc(b.rel)}</dd>
     <dt>Remote branch</dt><dd>${remote}</dd>
     <dt>Worktree</dt><dd>${b.worktree ? `<span class="mono">${esc(b.worktree)}</span>` : 'not checked out anywhere'}</dd>
@@ -593,7 +632,9 @@ function rowHtml(b) {
   if (open) ensureDetail(b);
   const tags = [];
   if (b.isCurrent) tags.push('<span class="tag cur">current</span>');
-  if (!b.mine) tags.push(`<span class="tag notmine" title="the commits here are by ${esc(b.author)}, not you — be careful">by ${esc(b.author || '?')}</span>`);
+  const by = b.owner.by;   // only people behind the branch's own commits, never the last commit's author
+  if (!b.mine && by.length)
+    tags.push(`<span class="tag notmine" title="the commits on this branch are by ${esc(by.join(', '))}, not you — be careful">by ${esc(by.slice(0, 2).join(', '))}${by.length > 2 ? ` +${by.length - 2}` : ''}</span>`);
   const s = b.status;
   return `<article class="row tone-${esc(s.tone)}${open ? ' open' : ''}" data-name="${esc(b.name)}">
     <div class="row-main" title="Click for details">
@@ -645,7 +686,7 @@ function toggleRow(name) {
 }
 
 // ── modal ──
-function closeModal() { $('#modalBg').classList.remove('show'); }
+function closeModal() { $('#modalBg').classList.remove('show'); $('#modal').oninput = null; $('#modal').onchange = null; }
 const modalOpen = () => $('#modalBg').classList.contains('show');
 $('#modalBg').addEventListener('click', (e) => { if (e.target === $('#modalBg')) closeModal(); });
 
@@ -761,6 +802,250 @@ function askDelete(b, hasRemote) {
   $('#mCancel').focus();
 }
 
+// ── worktrees ──
+const wtList = () => DATA.worktrees || [];
+const findWt = (p) => wtList().find((w) => w.path === p);
+const uncommitted = (n) => plural(n, 'uncommitted file');
+const slug = (s) => String(s).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+/, '').replace(/-+$/, '');
+
+// Why a new branch cannot be started in this worktree ('' means it can).
+function newBranchBlock(w) {
+  if (w.prunable) return 'the folder of this worktree is missing';
+  if (w.isRepo && w.branch === STATE.main) return `this checkout stays on ${STATE.main}`;
+  if (w.dirtyCount) return `${uncommitted(w.dirtyCount)} here — commit or stash first`;
+  return '';
+}
+
+function wtRunning(w) {
+  if (w.prunable) return '';
+  if (!w.ports.length) return '<span class="faint">nothing running</span>';
+  return `<span class="ports">${w.ports.map((p) =>
+    `<a class="port ${p.kind.toLowerCase()}" href="http://localhost:${p.port}" target="_blank" rel="noopener" title="${esc(p.proc)} · pid ${p.pid}">${p.kind} :${p.port}</a>`).join('')}</span>`;
+}
+
+function wtRowHtml(w) {
+  const where = w.prunable ? '<span class="warn">folder is missing</span>'
+    : w.branch ? `on <b class="mono">${esc(w.branch)}</b>`
+    : `<span class="muted">detached at <span class="mono">${esc(w.head)}</span></span>`;
+  const state = w.prunable ? '' : w.dirtyCount
+    ? `<span class="chip dirty">${uncommitted(w.dirtyCount)}</span>` : '<span class="chip clean">clean</span>';
+  const tag = (w.isRepo ? '<span class="tag cur" title="the checkout this console runs on">main checkout</span>' : '') +
+    (w.mine ? '<span class="tag yours" title="one of your worktrees: every branch open in it, or worked on in it, is yours">yours</span>' : '');
+  const noBranch = newBranchBlock(w);
+  const noRemove = w.isRepo ? 'this is the checkout the console runs on, it cannot be removed' : w.locked ? 'this worktree is locked (git worktree unlock)' : '';
+  const btn = (act, label, off, title, cls = '') =>
+    `<button class="wbtn ${cls}" data-wt="${act}" ${off ? 'disabled' : ''} title="${esc(off || title)}">${label}</button>`;
+  return `<div class="wt" data-path="${esc(w.path)}">
+    <div class="wt-id"><span class="wt-name" title="${esc(w.path)}">${esc(w.name)}</span><span class="wt-where">${where}${tag}</span></div>
+    <span class="wt-state">${state}</span>
+    <span>${wtRunning(w)}</span>
+    <span class="wt-act">${btn('branch', 'New branch', noBranch, 'start a new branch in this worktree')}${btn('remove', w.prunable ? 'Clean up' : 'Remove', noRemove,
+      w.prunable ? 'forget this worktree, its folder is already gone' : 'remove this worktree (its branch is kept)', 'danger')}</span>
+  </div>`;
+}
+
+function renderWorktrees() {
+  const open = store.get('wtOpen', true), list = wtList();
+  $('#wts').className = 'group wts' + (open ? ' open' : '');
+  $('#wts').innerHTML = `<h2><button class="exp" data-wt="toggle" aria-expanded="${open}" aria-label="show or hide worktrees">▶</button>Worktrees<span class="n">${list.length}</span>` +
+    `<small>folders where branches are open</small></h2>` + (open ? `<div class="rows">${list.map(wtRowHtml).join('')}</div>` : '');
+}
+
+// ── worktree dialogs ──
+const bases = () => (STATE.hasOriginMain ? ['origin/' + STATE.main, STATE.main] : [STATE.main]);
+const baseOptions = () => bases().map((t) => `<option value="${esc(t)}"${t === TARGET ? ' selected' : ''}>${esc(t)}</option>`).join('');
+const inModal = (sel) => $('#modal').querySelector(sel);
+function openModal(html) {
+  $('#modal').innerHTML = html;
+  $('#modalBg').classList.add('show');
+  $('#mCancel').onclick = closeModal;
+}
+
+function askNewWorktree() {
+  if (!DATA.worktrees || !DATA.wtSetup) return;
+  const setup = DATA.wtSetup, viaWt = setup.kind === 'wt';
+  const names = new Set((DATA.branches || []).map((b) => b.name));
+  const free = (DATA.branches || []).filter((b) => !b.worktree).map((b) => b.name).sort();
+  const usedPaths = new Set(wtList().map((w) => w.path));
+  const noNumber = viaWt && setup.nextNumber === null;
+
+  openModal(`
+    <h3>New worktree</h3>
+    <div class="desc">A separate folder where a branch is open, so you can work on two things at once.</div>
+    <div class="field"><label>Branch</label>
+      <div class="choice">
+        <label><input type="radio" name="wbMode" value="new" checked /> New branch</label>
+        <label title="${free.length ? '' : 'every branch is already open in a worktree'}"><input type="radio" name="wbMode" value="old" ${free.length ? '' : 'disabled'} /> Existing branch</label>
+      </div></div>
+    <div class="field" id="wbNew"><div class="two">
+      <div><label>Name of the new branch</label><input type="text" id="wbName" data-enter placeholder="feat-my-change" autocomplete="off" spellcheck="false" /></div>
+      <div><label>Start from</label><select id="wbBase">${baseOptions()}</select></div>
+    </div></div>
+    <div class="field" id="wbOld" style="display:none"><label>Branch to open</label>
+      <select id="wbExisting">${free.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>
+    <div class="field">${viaWt
+      ? `<label>Worktree number (${setup.min} to ${setup.max})</label><input type="number" id="wbNum" data-enter min="${setup.min}" max="${setup.max}" step="1" value="${setup.nextNumber ?? ''}" />`
+      : `<label>Folder name</label><div class="prefixed"><span>${esc(setup.repoName)}-</span><input type="text" id="wbFolder" data-enter autocomplete="off" spellcheck="false" /></div>`}
+      <div class="hint" id="wbHint"></div></div>
+    <div class="cmd" id="wbCmd"></div>
+    ${viaWt ? '<div class="mwarn">⚠ Sets up env files, dependencies and a database for the new worktree. This can take a minute.</div>' : ''}
+    <div class="foot">
+      <button class="btn ghost" id="mCancel">Cancel</button>
+      <button class="btn accent" id="mOk">Create worktree</button>
+    </div>`);
+
+  let folderTouched = false;
+  const sync = () => {
+    const mode = inModal('input[name=wbMode]:checked').value;
+    inModal('#wbNew').style.display = mode === 'new' ? '' : 'none';
+    inModal('#wbOld').style.display = mode === 'old' ? '' : 'none';
+    const branch = mode === 'new' ? inModal('#wbName').value.trim() : (inModal('#wbExisting').value || '');
+    const base = inModal('#wbBase').value;
+    let problem = '';
+    if (mode === 'new') {
+      if (!branch) problem = 'Type a name for the new branch.';
+      else if (/\s/.test(branch)) problem = 'A branch name cannot contain spaces.';
+      else if (branch.startsWith('-')) problem = 'A branch name cannot start with a dash.';
+      else if (names.has(branch)) problem = `A branch named “${branch}” already exists.`;
+    } else if (!branch) problem = 'Every branch is already open in a worktree.';
+
+    let wtPath = '', n = null, folder = '', where = '';
+    if (viaWt) {
+      n = parseInt(inModal('#wbNum').value, 10);
+      if (noNumber) problem = problem || `All ${setup.max} worktree numbers are in use. Remove one first.`;
+      else if (!(n >= setup.min && n <= setup.max)) problem = problem || `The number must be from ${setup.min} to ${setup.max}.`;
+      else {
+        wtPath = `${setup.parent}/${setup.repoName}-${3000 + n}`;
+        where = `Folder ${setup.repoName}-${3000 + n} · frontend :${3000 + n} · backend :${4000 + n}`;
+        if (usedPaths.has(wtPath)) problem = problem || `Number ${n} is already in use.`;
+      }
+    } else {
+      const f = inModal('#wbFolder');
+      if (!folderTouched) f.value = slug(branch);
+      folder = f.value.trim();
+      if (!/^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(folder)) problem = problem || 'The folder name can only use letters, numbers, dots, dashes and underscores.';
+      else {
+        wtPath = `${setup.parent}/${setup.repoName}-${folder}`;
+        where = `Folder ${wtPath}`;
+        if (usedPaths.has(wtPath)) problem = problem || 'That folder is already a worktree.';
+      }
+    }
+    const hint = inModal('#wbHint');
+    hint.textContent = problem || where;
+    hint.className = 'hint' + (problem && (branch || mode === 'old') ? ' bad' : '');
+    const b = branch || '<branch>';
+    inModal('#wbCmd').textContent = viaWt
+      ? (mode === 'new' ? `git branch --no-track ${b} ${base}\n` : '') + `scripts/wt create ${Number.isNaN(n) ? '<number>' : n} ${b}`
+      : (mode === 'new' ? `git worktree add --no-track -b ${b} ${wtPath || '<folder>'} ${base}` : `git worktree add ${wtPath || '<folder>'} ${b}`);
+    inModal('#mOk').disabled = !!problem;
+    return { mode, branch, base, n, folder, name: viaWt ? `${setup.repoName}-${3000 + n}` : `${setup.repoName}-${folder}` };
+  };
+  $('#modal').oninput = (e) => { if (e.target.id === 'wbFolder') folderTouched = true; sync(); };
+  $('#modal').onchange = sync;
+  inModal('#mOk').onclick = () => {
+    const s = sync();
+    if (inModal('#mOk').disabled) return;
+    closeModal();
+    act('worktree-add', { branch: s.branch, newBranch: s.mode === 'new', base: s.base, ...(viaWt ? { number: s.n } : { folder: s.folder }) },
+      `Create worktree ${s.name}`);
+  };
+  sync();
+  inModal('#wbName').focus();
+}
+
+function askNewBranch(pre) {
+  if (!DATA.worktrees) return;
+  const wts = wtList();
+  const eligible = wts.filter((w) => !newBranchBlock(w));
+  if (!eligible.length) {
+    openModal(`<h3>New branch</h3>
+      <div class="desc">A new branch is started inside one of your worktrees. None of them can take one right now:</div>
+      <div class="cmd">${esc(wts.map((w) => `${w.name}: ${newBranchBlock(w)}`).join('\n'))}</div>
+      <div class="foot"><button class="btn ghost" id="mCancel">Close</button></div>`);
+    return;
+  }
+  const names = new Set((DATA.branches || []).map((b) => b.name));
+  const chosen = (pre && eligible.find((w) => w.path === pre)) || eligible[0];
+  openModal(`
+    <h3>New branch in a worktree</h3>
+    <div class="desc">Creates the branch and switches that worktree onto it. The branch it is on now is kept.</div>
+    <div class="field"><label>Worktree</label><select id="nbWt">${wts.map((w) => {
+      const why = newBranchBlock(w);
+      return `<option value="${esc(w.path)}" ${w.path === chosen.path ? 'selected' : ''} ${why ? 'disabled' : ''}>${esc(w.name)} · ${w.branch ? 'on ' + esc(w.branch) : 'detached'}${why ? ' (' + esc(why) + ')' : ''}</option>`;
+    }).join('')}</select></div>
+    <div class="field"><div class="two">
+      <div><label>Name of the new branch</label><input type="text" id="nbName" data-enter placeholder="feat-my-change" autocomplete="off" spellcheck="false" /></div>
+      <div><label>Start from</label><select id="nbBase">${baseOptions()}</select></div>
+    </div><div class="hint" id="nbHint"></div></div>
+    <div class="cmd" id="nbCmd"></div>
+    <div class="foot">
+      <button class="btn ghost" id="mCancel">Cancel</button>
+      <button class="btn accent" id="mOk">Create branch</button>
+    </div>`);
+  const sync = () => {
+    const name = inModal('#nbName').value.trim(), base = inModal('#nbBase').value, path = inModal('#nbWt').value;
+    let problem = '';
+    if (!name) problem = 'Type a name for the new branch.';
+    else if (/\s/.test(name)) problem = 'A branch name cannot contain spaces.';
+    else if (name.startsWith('-')) problem = 'A branch name cannot start with a dash.';
+    else if (names.has(name)) problem = `A branch named “${name}” already exists.`;
+    inModal('#nbHint').textContent = problem;
+    inModal('#nbHint').className = 'hint' + (problem && name ? ' bad' : '');
+    inModal('#nbCmd').textContent = `git -C ${path} switch -c ${name || '<branch>'} --no-track ${base}`;
+    inModal('#mOk').disabled = !!problem;
+    return { name, base, path };
+  };
+  $('#modal').oninput = sync;
+  $('#modal').onchange = sync;
+  inModal('#mOk').onclick = () => {
+    const s = sync();
+    if (inModal('#mOk').disabled) return;
+    closeModal();
+    act('branch-new', { worktree: s.path, name: s.name, base: s.base }, `New branch ${s.name} in ${(findWt(s.path) || {}).name || 'worktree'}`);
+  };
+  sync();
+  inModal('#nbName').focus();
+}
+
+function askRemoveWorktree(path) {
+  const w = findWt(path);
+  if (!w) return;
+  const viaWt = w.wtId !== null && w.wtId !== undefined && !w.prunable;
+  const ports = w.ports.map((p) => `${p.kind} :${p.port}`).join(', ');
+  openModal(`
+    <h3>${w.prunable ? 'Clean up' : 'Remove'} worktree “${esc(w.name)}”</h3>
+    <div class="desc">${w.prunable
+      ? 'The folder is already gone. This only clears git’s record of it.'
+      : `Deletes the folder <code>${esc(w.path)}</code>.` + (w.branch ? ` The branch <code>${esc(w.branch)}</code> is kept, so no commits are lost.` : '')}</div>
+    <div class="cmd" id="rmCmd"></div>
+    ${w.dirtyCount ? `<label class="minef" style="margin-top:12px"><input type="checkbox" id="rmForce" /> Throw away the ${uncommitted(w.dirtyCount)} in this worktree</label>` : ''}
+    ${viaWt ? `<label class="minef" style="margin-top:12px"><input type="checkbox" id="rmDb" /> Also delete this worktree’s database</label>` : ''}
+    ${ports ? `<div class="mwarn">⚠ ${viaWt ? `Stops the dev servers running here: ${esc(ports)}.` : `${esc(ports)} is still running from this folder. Stop it first.`}</div>` : ''}
+    ${w.dirtyCount ? `<div class="mwarn">⚠ Uncommitted files are lost for good. Tick the box above to confirm.</div>` : ''}
+    <div class="mwarn" id="rmDbWarn" style="display:none">⚠ The database and everything in it is deleted for good.</div>
+    <div class="foot">
+      <button class="btn ghost" id="mCancel">Cancel</button>
+      <button class="btn red" id="mOk">${w.prunable ? 'Clean up' : 'Remove worktree'}</button>
+    </div>`);
+  const sync = () => {
+    const force = !!(inModal('#rmForce') && inModal('#rmForce').checked), dropDb = !!(inModal('#rmDb') && inModal('#rmDb').checked);
+    inModal('#rmCmd').textContent = w.prunable ? 'git worktree prune'
+      : viaWt ? `scripts/wt ${dropDb ? 'delete' : 'remove'} ${w.wtId}` : `git worktree remove${force ? ' --force' : ''} ${w.path}`;
+    inModal('#mOk').disabled = !!w.dirtyCount && !force;
+    inModal('#rmDbWarn').style.display = dropDb ? '' : 'none';
+    return { force, dropDb };
+  };
+  $('#modal').onchange = sync;
+  inModal('#mOk').onclick = () => {
+    const s = sync();
+    if (inModal('#mOk').disabled) return;
+    closeModal();
+    act('worktree-remove', { path: w.path, force: s.force, dropDb: s.dropDb }, `${w.prunable ? 'Clean up' : 'Remove'} worktree ${w.name}`);
+  };
+  sync();
+  $('#mCancel').focus();
+}
+
 // ── run an action ──
 let outTimer = null;
 async function act(endpoint, body, label) {
@@ -811,6 +1096,15 @@ $('#mineOnly').addEventListener('change', (e) => { MINE_ONLY = e.target.checked;
 $('#q').addEventListener('input', (e) => { QUERY = e.target.value; renderList(); });
 $('#refreshBtn').onclick = () => load({ force: true });
 $('#fetchBtn').onclick = () => act('fetch', {}, 'git fetch --prune origin');
+$('#newWtBtn').onclick = () => askNewWorktree();
+$('#newBranchBtn').onclick = () => askNewBranch();
+$('#wts').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-wt]'); if (!el || el.disabled) return;
+  if (el.dataset.wt === 'toggle') { store.set('wtOpen', !store.get('wtOpen', true)); return renderWorktrees(); }
+  const row = el.closest('.wt'); if (!row) return;
+  if (el.dataset.wt === 'branch') askNewBranch(row.dataset.path);
+  if (el.dataset.wt === 'remove') askRemoveWorktree(row.dataset.path);
+});
 
 $('#banners').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-banner]'); if (!btn) return;
@@ -848,6 +1142,11 @@ $('#list').addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && modalOpen() && e.target.matches && e.target.matches('[data-enter]')) {
+    const ok = $('#mOk');
+    if (ok && !ok.disabled) { e.preventDefault(); ok.click(); }
+    return;
+  }
   if (e.key === 'Escape') {
     if (modalOpen()) return closeModal();
     if (document.activeElement === $('#q')) { QUERY = ''; $('#q').value = ''; $('#q').blur(); renderList(); }
